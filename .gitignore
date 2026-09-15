@@ -1,0 +1,25 @@
+# dependencies
+node_modules/
+
+# database files (แต่ละ topic folder อาจมี sqlite db ของตัวเอง)
+*.sqlite
+*.sqlite3
+*.db
+
+# env
+.env
+.env.*.local
+.env.local
+
+# build output
+dist/
+out/
+*.tsbuildinfo
+
+# logs
+logs/
+*.log
+
+# OS / IDE
+.DS_Store
+.idea/

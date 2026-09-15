@@ -1,0 +1,34 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1789477630723,
+      "tag": "0000_dazzling_runaways",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1789478443511,
+      "tag": "0001_brief_venom",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1789478458561,
+      "tag": "0002_polite_bullseye",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1789478766129,
+      "tag": "0003_silent_wendell_vaughn",
+      "breakpoints": true
+    }
+  ]
+}
