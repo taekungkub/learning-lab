@@ -14,9 +14,10 @@ export const users = sqliteTable("users", {
   role: text("role", { enum: ["admin", "member"] })
     .notNull()
     .default("member"),
+  bio: text("bio"),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
-    .$defaultFn(() => new Date()), 
+    .$defaultFn(() => new Date()),
 });
 
 // one-to-many: user -> posts
