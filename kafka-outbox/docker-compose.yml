@@ -1,0 +1,22 @@
+# ใช้เฉพาะเครื่องที่ยังไม่มี redpanda รันอยู่ (port 19092 ชนกับตัวเดิม)
+# docker compose up -d
+services:
+  redpanda:
+    image: redpandadata/redpanda:latest
+    command:
+      - redpanda start
+      - --mode dev-container
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+
+  # GUI: http://localhost:8089 (8088 ชนกับ redpanda-console ตัวเดิมในเครื่อง)
+  console:
+    image: redpandadata/console:latest
+    environment:
+      KAFKA_BROKERS: redpanda:9092 # internal listener ใน network ของ compose
+    ports:
+      - "8089:8080"
+    depends_on:
+      - redpanda

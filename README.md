@@ -7,6 +7,8 @@
 - [`drizzle-demo/`](./drizzle-demo) — ฝึก Drizzle ORM (schema, migrations, relations,
   query API) บน Bun + SQLite (libsql) ดู `drizzle-demo/README.md` และ
   `drizzle-demo/docs/` สำหรับรายละเอียด
+- [`kafka-outbox/`](./kafka-outbox) — Transactional Outbox Pattern + Kafka (relay, retry,
+  idempotent consumer) บน Bun + Drizzle + libSQL ดู `kafka-outbox/docs/outbox-pattern.md`
 
 ## แนวทางการเพิ่ม topic ใหม่
 
