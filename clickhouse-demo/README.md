@@ -53,4 +53,14 @@ env ของ 10/11:
 
 PowerShell: `$env:DEVICES=100; bun run examples/10-simulator.ts`
 
+## ขั้นต่อไป (ยังไม่ทำ ทำทีละขั้น)
+
+1. ตาราง `devices` (id, type, location เป็น path `site/plant/building`) ให้ `getStats()` เลือกตาม location/type และ groupBy location ได้
+   - กรองด้วย `sensor IN (SELECT id FROM devices ...)` (ใช้ index: 114/165 granule) ห้าม `dictGet` ใน WHERE (165/165)
+   - `dictGet` ใช้ได้แค่ใน GROUP BY / dictionary อัปเดตตาม LIFETIME device ใหม่อาจยังไม่อยู่
+2. รวมข้าม device ตามชนิด metric: avg (temp, voltage), **sum** (power_kw, current), counter (energy_kwh: sum ของ max-min ต่อ device)
+   ตอนนี้ `groupBy: "total"` ใช้ avg กับทุก metric ซึ่งผิดสำหรับ power_kw / energy_kwh
+3. device ย้าย location: ใช้ location ปัจจุบัน = ข้อมูลย้อนหลังย้ายตาม ถ้าต้องการแยกต้องเก็บ location ในแถวตอน insert
+4. ข้อมูลไม่สมบูรณ์ (device หาย, ส่งซ้ำ, ส่งย้อนหลัง, counter reset), benchmark 10k device, benchmark PG
+
 Query พร้อม copy ไปรันใน TablePlus (ชั่วโมง/วัน/เดือน/ปี, raw, หลาย meter, aggregation, ดูเวลา query, TTL, partition): `docs/queries.sql`
