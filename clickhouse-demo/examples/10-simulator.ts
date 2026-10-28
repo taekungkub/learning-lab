@@ -2,34 +2,17 @@
 // DEVICES=100 bun run examples/10-simulator.ts  (เปลี่ยนจำนวน device ได้)
 // จำลอง device ส่งข้อมูลทุก 1 วิ: รวมทุก device เป็น 1 batch ต่อวินาที แล้ว insert เข้า sensor_raw
 // (ระบบจริงตัวกลาง เช่น Kafka/service รวม batch ให้ device ห้าม insert เองทีละตัว)
+// device/metric นิยามที่ src/mock.ts (ชุดเดียวกับ 11-backfill ข้อมูลต่อกันได้)
 // Ctrl+C หยุด
 import { ch, rows } from "../src/ch";
+import { makeDevices, payload } from "../src/mock";
 
-const DEVICES = Number(process.env.DEVICES ?? 10);
-
-// ครึ่งหนึ่งเป็นเครื่องวัดอุณหภูมิ (th-*) อีกครึ่งเป็นมิเตอร์ไฟ (pm-*) key ต่างกัน
-const devices = Array.from({ length: DEVICES }, (_, i) =>
-  i % 2 === 0 ? { id: `th-${i / 2 + 1}`, kind: "th" as const } : { id: `pm-${(i + 1) / 2}`, kind: "pm" as const },
-);
-
-// ค่าเดินแบบ random walk รอบค่ากลาง (ดูเป็นกราฟจริงกว่าสุ่มล้วน)
-const state = new Map<string, number>();
-const walk = (key: string, base: number, spread: number) => {
-  const v = (state.get(key) ?? base) + (Math.random() - 0.5) * spread * 0.1;
-  const clamped = Math.min(base + spread, Math.max(base - spread, v));
-  state.set(key, clamped);
-  return Math.round(clamped * 10) / 10;
-};
-
-const payload = (d: (typeof devices)[number], ts: number) =>
-  d.kind === "th"
-    ? { ts, sensor: d.id, data: { temp: walk(`${d.id}.temp`, 27, 5), humidity: walk(`${d.id}.hum`, 60, 15), status: "ok" } }
-    : { ts, sensor: d.id, data: { voltage: walk(`${d.id}.v`, 220, 5), current: walk(`${d.id}.a`, 3, 2) } };
+const devices = makeDevices(Number(process.env.DEVICES ?? 10));
 
 let running = true;
 process.on("SIGINT", () => (running = false));
 
-console.log(`ส่ง ${DEVICES} device ทุก 1 วิ (Ctrl+C หยุด)`);
+console.log(`ส่ง ${devices.length} device ทุก 1 วิ (Ctrl+C หยุด)`);
 let tick = 0;
 while (running) {
   const started = Date.now();

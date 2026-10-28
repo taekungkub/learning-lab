@@ -1,7 +1,7 @@
 # clickhouse-demo
 
 ฝึก ClickHouse (columnar OLAP database) บน Bun + `@clickhouse/client` (HTTP interface)
-ดูแนวคิดหลักใน `docs/concepts.md`
+ดูแนวคิดหลักใน `docs/concepts.md`, คำศัพท์ + เทียบ PostgreSQL (ไว้ตัดสินใจ) ใน `docs/glossary-vs-pg.md`
 
 ## Setup
 
@@ -27,11 +27,29 @@ bun run examples/05-materialized-view.ts     # MV + AggregatingMergeTree (sumSta
 bun run examples/06-update-delete.ts         # (หลัง 01) lightweight DELETE, ALTER UPDATE mutation
 bun run examples/07-hourly-rollup.ts         # insert ทุก 1 วิ + MV hourly, ดู state ย่อยถูก merge, view สำหรับ GUI
 bun run examples/08-multi-metric.ts          # sensor key ต่างกัน: raw JSON → MV แตกเป็น long format → hourly → daily (เวลาไทย)
-bun run examples/09-query-service.ts         # (หลัง 08) getStats() ใน src/stats.ts: hour/day/month/year จาก hourly
-bun run examples/10-simulator.ts             # (หลัง 08) 10 device ส่งทุก 1 วิ เข้า sensor_raw (DEVICES=100 ปรับได้, Ctrl+C หยุด)
-bun run examples/11-backfill.ts              # (หลัง 08) mock 5 ปีรายวินาที 10 device เต็มช่วง TTL ของแต่ละตาราง (~3 นาที)
+bun run examples/09-query-service.ts         # (หลัง 11) getStats(): hour/day จาก hourly, month/year จาก daily (อ่านอย่างเดียว)
+bun run examples/10-simulator.ts             # (หลัง 08) device ส่งทุก 1 วิ เข้า sensor_raw (Ctrl+C หยุด)
+bun run examples/11-backfill.ts              # (หลัง 08) mock ย้อนหลังรายวินาที เต็มช่วง TTL ของแต่ละตาราง
 ```
 
-ทุก example DROP/CREATE ตารางเอง รันซ้ำได้
+ทุก example DROP/CREATE ตารางเอง รันซ้ำได้ ยกเว้น 09 ที่อ่านอย่างเดียว
 
-Query พร้อม copy ไปรันใน TablePlus (ชั่วโมง/วัน/เดือน/ปี, fleet, ดูเวลา query, partition): `docs/queries.sql`
+**ระวัง: 08 DROP ตาราง `sensor_*` ทั้งหมด** (ข้อมูลที่ 10/11 ใส่ไว้หาย) และ 11 TRUNCATE ก่อนใส่ใหม่
+
+## ชุด sensor (08-11)
+
+ลำดับรัน: `08` (schema) → `11` (mock ย้อนหลัง) → `10` (ข้อมูลใหม่ต่อเนื่อง ถ้าต้องการ) → `09` / `docs/queries.sql`
+
+| ไฟล์ | ตั้งค่า |
+|---|---|
+| `src/config.ts` | TTL ของ raw / long / hourly (08 สร้างตาราง, 11 ใช้กำหนดช่วงที่ mock) |
+| `src/mock.ts` | device + metric จำลอง (th-*: temp, humidity, ... / pm-*: 3 เฟส, kW, kWh counter) |
+| `src/stats.ts` | `getStats()` สำหรับ API/service: grain, groupBy device/fleet |
+
+env ของ 10/11:
+- `DEVICES=100` จำนวน device (ค่าเริ่มต้น 10)
+- `YEARS=5` ช่วงย้อนหลังของ 11 (ค่าเริ่มต้น 3: เกิน TTL hourly 2 ปีมีแค่ใน `sensor_daily`)
+
+PowerShell: `$env:DEVICES=100; bun run examples/10-simulator.ts`
+
+Query พร้อม copy ไปรันใน TablePlus (ชั่วโมง/วัน/เดือน/ปี, raw, หลาย meter, aggregation, ดูเวลา query, TTL, partition): `docs/queries.sql`
