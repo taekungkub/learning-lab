@@ -28,6 +28,10 @@ bun run examples/06-update-delete.ts         # (หลัง 01) lightweight DEL
 bun run examples/07-hourly-rollup.ts         # insert ทุก 1 วิ + MV hourly, ดู state ย่อยถูก merge, view สำหรับ GUI
 bun run examples/08-multi-metric.ts          # sensor key ต่างกัน: raw JSON → MV แตกเป็น long format → hourly → daily (เวลาไทย)
 bun run examples/09-query-service.ts         # (หลัง 08) getStats() ใน src/stats.ts: hour/day/month/year จาก hourly
+bun run examples/10-simulator.ts             # (หลัง 08) 10 device ส่งทุก 1 วิ เข้า sensor_raw (DEVICES=100 ปรับได้, Ctrl+C หยุด)
+bun run examples/11-backfill.ts              # (หลัง 08) mock 5 ปีรายวินาที 10 device เต็มช่วง TTL ของแต่ละตาราง (~3 นาที)
 ```
 
 ทุก example DROP/CREATE ตารางเอง รันซ้ำได้
+
+Query พร้อม copy ไปรันใน TablePlus (ชั่วโมง/วัน/เดือน/ปี, fleet, ดูเวลา query, partition): `docs/queries.sql`

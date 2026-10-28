@@ -6,6 +6,7 @@
 //                                                                           ▲ sensor_hourly_v       ▲ sensor_daily_v
 
 import { ch, rows } from "../src/ch";
+import { TTL, ttlSql } from "../src/config";
 
 for (const t of [
   "sensor_daily_v", "sensor_daily_mv", "sensor_daily",
@@ -14,18 +15,17 @@ for (const t of [
 ])
   await ch.command({ query: `DROP TABLE IF EXISTS ${t}` });
 
-// TTL + PARTITION (ขนาด partition ใกล้ช่วง TTL, ttl_only_drop_parts = ลบทั้ง partition ไม่ตัดทีละแถว):
-// raw     7 วัน  partition รายวัน   ไว้ debug payload เดิม (ซ้ำกับ long)
-// long    30 วัน partition รายวัน   ดูรายวินาที/นาทีช่วงสั้น
-// hourly  2 ปี   partition รายเดือน กราฟรายชั่วโมง
-// daily   ไม่ลบ  ไม่แบ่ง partition   เล็ก ใช้ดูรายเดือน/ปีย้อนหลังทั้งหมด
-// TTL ต้องเรียงสั้นไปยาวตามชั้น: rollup ถูกเขียนตอน insert แล้ว ลบชั้นล่างไม่กระทบชั้นบน
+// TTL ตั้งค่าที่ src/config.ts
+// PARTITION ขนาดใกล้ช่วง TTL + ttl_only_drop_parts = ลบทั้ง partition ไม่ตัดทีละแถว:
+// raw, long  partition รายวัน
+// hourly     partition รายเดือน
+// daily      ไม่แบ่ง partition (เล็ก ไม่มี TTL)
 
 // 1) raw: เก็บ payload ทั้งก้อน ClickHouse แยกแต่ละ key เป็น subcolumn ให้เอง
 await ch.command({
   query: `CREATE TABLE sensor_raw (ts DateTime, sensor LowCardinality(String), data JSON)
           ENGINE = MergeTree PARTITION BY toYYYYMMDD(ts) ORDER BY (sensor, ts)
-          TTL ts + INTERVAL 7 DAY
+          TTL ts + ${ttlSql(TTL.raw)}
           SETTINGS ttl_only_drop_parts = 1`,
 });
 
@@ -34,7 +34,7 @@ await ch.command({
   query: `CREATE TABLE sensor_long (
             ts DateTime, sensor LowCardinality(String), metric LowCardinality(String), value Float64
           ) ENGINE = MergeTree PARTITION BY toYYYYMMDD(ts) ORDER BY (sensor, metric, ts)
-          TTL ts + INTERVAL 30 DAY
+          TTL ts + ${ttlSql(TTL.long)}
           SETTINGS ttl_only_drop_parts = 1`,
 });
 
@@ -56,7 +56,7 @@ await ch.command({
             min_v   SimpleAggregateFunction(min, Float64),
             max_v   SimpleAggregateFunction(max, Float64)
           ) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(hour) ORDER BY (sensor, metric, hour)
-          TTL hour + INTERVAL 2 YEAR
+          TTL hour + ${ttlSql(TTL.hourly)}
           SETTINGS ttl_only_drop_parts = 1`,
 });
 await ch.command({
