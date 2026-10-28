@@ -60,7 +60,7 @@ PowerShell: `$env:DEVICES=100; bun run examples/10-simulator.ts`
    - `dictGet` ใช้ได้แค่ใน GROUP BY / dictionary อัปเดตตาม LIFETIME device ใหม่อาจยังไม่อยู่
 2. รวมข้าม device ตามชนิด metric: avg (temp, voltage), **sum** (power_kw, current), counter (energy_kwh: sum ของ max-min ต่อ device)
    ตอนนี้ `groupBy: "total"` ใช้ avg กับทุก metric ซึ่งผิดสำหรับ power_kw / energy_kwh
-3. device ย้าย location: ใช้ location ปัจจุบัน = ข้อมูลย้อนหลังย้ายตาม ถ้าต้องการแยกต้องเก็บ location ในแถวตอน insert
+3. device ย้าย location: **ตัดสินใจแล้ว** raw เก็บแค่ device_id, location มาจากตาราง `devices` (ปัจจุบัน) ถาม location ข้อมูลก่อนย้ายไปนับที่ location ใหม่ ถามตาม device ถูกเสมอ (ต้องแยกจริงค่อยเพิ่มตารางประวัติการย้าย ไม่ต้องแก้ raw)
 4. ข้อมูลไม่สมบูรณ์ (device หาย, ส่งซ้ำ, ส่งย้อนหลัง, counter reset), benchmark 10k device, benchmark PG
 
 Query พร้อม copy ไปรันใน TablePlus (ชั่วโมง/วัน/เดือน/ปี, raw, หลาย meter, aggregation, ดูเวลา query, TTL, partition): `docs/queries.sql`
