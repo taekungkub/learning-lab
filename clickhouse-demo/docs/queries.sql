@@ -138,7 +138,7 @@ GROUP BY t
 ORDER BY t;
 
 
--- 5. รายวัน รวมทั้ง fleet (7 วันล่าสุด)
+-- 5. รายวัน รวมทุก device (total, 7 วันล่าสุด)
 -- avg ถ่วงน้ำหนักตาม samples, devices = จำนวน device ที่ส่งข้อมูล
 SELECT toDate(hour, 'Asia/Bangkok') AS t, metric, uniqExact(sensor) AS devices,
        countMerge(samples) AS n, round(avgMerge(avg_v), 2) AS avg, min(min_v) AS min, max(max_v) AS max

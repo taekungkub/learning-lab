@@ -44,7 +44,7 @@ bun run examples/11-backfill.ts              # (หลัง 08) mock ย้อ�
 |---|---|
 | `src/config.ts` | TTL ของ raw / long / hourly (08 สร้างตาราง, 11 ใช้กำหนดช่วงที่ mock) |
 | `src/mock.ts` | device + metric จำลอง (th-*: temp, humidity, ... / pm-*: 3 เฟส, kW, kWh counter) |
-| `src/stats.ts` | `getStats()` สำหรับ API/service: grain, groupBy device/fleet |
+| `src/stats.ts` | `getStats()` สำหรับ API/service: หลาย sensor/metric, grain, groupBy device/total, response `{ meta, data }` + `toSeries` / `toWide` |
 
 env ของ 10/11:
 - `DEVICES=100` จำนวน device (ค่าเริ่มต้น 10)
