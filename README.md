@@ -9,6 +9,9 @@
   `drizzle-demo/docs/` สำหรับรายละเอียด
 - [`kafka-outbox/`](./kafka-outbox) — Transactional Outbox Pattern + Kafka (relay, retry,
   idempotent consumer) บน Bun + Drizzle + libSQL ดู `kafka-outbox/docs/outbox-pattern.md`
+- [`clickhouse-demo/`](./clickhouse-demo) — ClickHouse 26.3 (MergeTree, sparse primary index,
+  ReplacingMergeTree, materialized view, mutations) บน Bun + `@clickhouse/client`
+  ดู `clickhouse-demo/docs/concepts.md`
 
 ## แนวทางการเพิ่ม topic ใหม่
 
