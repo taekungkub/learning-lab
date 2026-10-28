@@ -80,12 +80,13 @@ const valueSql = (sensor: string, m: string) => `
                   + ${m}.4 * sin(2 * pi() * (toHour(ts, 'Asia/Bangkok') - 9) / 24)
                   + ${m}.5 * (sipHash64(${sensor}, ${m}.1, ts) % 1000000 / 500000 - 1), 2))`;
 
-const tsSql = `(SELECT toDateTime({from:UInt32}) + number AS ts FROM numbers({n:UInt64}))`;
+// step = ห่างกันกี่วินาที ({n} = จำนวนจุด ไม่ใช่จำนวนวินาที)
+const tsSql = (step = 1) => `(SELECT toDateTime({from:UInt32}) + number * ${step} AS ts FROM numbers({n:UInt64}))`;
 
-// long format: (ts, sensor, metric, value) ทุก device × metric ต่อวินาที
-export const longSql = (devices: Device[]) => `
+// long format: (ts, sensor, metric, value) ทุก device × metric ทุก step วินาที
+export const longSql = (devices: Device[], step = 1) => `
   SELECT ts, s.1 AS sensor, s.2.1 AS metric, ${valueSql("s.1", "s.2")} AS value
-  FROM ${tsSql}
+  FROM ${tsSql(step)}
   ARRAY JOIN [${devices.flatMap((d) => metricTuples(d).map((t) => `('${d.id}', ${t})`)).join(", ")}] AS s`;
 
 // raw: (ts, sensor, data JSON) 1 แถวต่อ device ต่อวินาที
@@ -93,5 +94,5 @@ export const rawSql = (devices: Device[]) => `
   SELECT ts, d.1 AS sensor,
          concat('{', arrayStringConcat(arrayMap(m -> concat('"', m.1, '":', toString(${valueSql("d.1", "m")})), d.2), ','),
                 if(d.3 = 'th', ',"status":"ok"', ''), '}')::JSON AS data
-  FROM ${tsSql}
+  FROM ${tsSql()}
   ARRAY JOIN [${devices.map((d) => `('${d.id}', [${metricTuples(d).join(", ")}], '${d.kind}')`).join(", ")}] AS d`;

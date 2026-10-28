@@ -37,7 +37,7 @@ ClickHouse เหมาะกว่าถ้าส่งถี่ (ระดั�
 | **TTL** | ลบแถว (หรือล้างคอลัมน์/ย้าย disk) ที่เก่ากว่ากำหนด ทำตอน merge ไม่ตรงเวลา | `src/config.ts` |
 | **ttl_only_drop_parts** | TTL ลบทั้ง part ทีเดียว ไม่ตัดทีละแถว (ต้อง partition ให้ขนาดใกล้ช่วง TTL) | ex 08 |
 | **LowCardinality(T)** | dictionary encoding สำหรับค่าที่ซ้ำเยอะ (ชื่อ device, metric) | ex 02: 9 MiB → 45 KiB |
-| **Codec** | วิธีบีบอัดต่อคอลัมน์ `LZ4` (default), `ZSTD`, `Delta` (เวลา), `Gorilla` (float ขยับทีละนิด) | |
+| **Codec** | วิธีบีบอัดต่อคอลัมน์ `LZ4` (default), `ZSTD`, `Delta` (เวลา), `Gorilla` (float ขยับทีละนิด) แก้ทีหลังได้ด้วย `ALTER ... MODIFY COLUMN` | ex 08: `ts` Delta+ZSTD, `value` ZSTD |
 
 ### Engine
 
@@ -167,7 +167,10 @@ ClickHouse เหมาะกว่าถ้าส่งถี่ (ระดั�
 | 1 ปีรายวินาที 31.5M แถว: รายวันจาก hourly | 3.4 ms, อ่าน 8,760 แถว | benchmark ในแชท |
 | เหมือนกันแต่จาก raw | 83.7 ms, อ่าน 31.5M แถว | benchmark ในแชท |
 | avg ข้ามชั้น hourly → day/month/year เทียบ raw | count/min/max ตรงทุกแถว avg ต่าง ≤ 7×10⁻¹³ | benchmark ในแชท |
-| 20 series × 30 วัน รายวินาที (`sensor_long`) | 51.8M แถว = 340 MiB | ex 11 รุ่นแรก |
+| 75 series × 30 วัน รายวินาที (`sensor_long`) LZ4 default | 194.4M แถว = 1.29 GiB (7 byte/แถว) | ex 11 |
+| เหมือนกัน + codec `ts` Delta+ZSTD, `value` ZSTD | 356.65 MiB (1.9 byte/แถว) เล็กลง 3.7 เท่า | ex 08 + 11 |
+| codec `ts` อย่างเดียว | 676 MiB → 834 KiB (บีบ ~830 เท่า) | ex 08 + 11 |
+| เทียบ codec ของ `value` 1 วัน | ZSTD 11.7 MiB < LZ4 20.4 < FPC 21.0 < Gorilla 26.2 | benchmark ในแชท (mock มี noise สุ่ม) |
 
 ข้อจำกัด: เครื่องเดียว, query ไม่มีคนแย่ง, ข้อมูล mock (noise สุ่ม บีบอัดแย่กว่าข้อมูลจริงที่ขยับช้า)
 

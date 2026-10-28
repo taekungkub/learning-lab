@@ -49,6 +49,7 @@ bun run examples/11-backfill.ts              # (หลัง 08) mock ย้อ�
 env ของ 10/11:
 - `DEVICES=100` จำนวน device (ค่าเริ่มต้น 10)
 - `YEARS=5` ช่วงย้อนหลังของ 11 (ค่าเริ่มต้น 3: เกิน TTL hourly 2 ปีมีแค่ใน `sensor_daily`)
+- `COARSE=1` ให้ 11 สร้าง hourly/daily จากค่ารายวินาทีจริง (ค่าเริ่มต้น 60: ค่าทุก 60 วิ นับเป็น 60 จุด เร็วกว่า ~30 เท่า)
 
 PowerShell: `$env:DEVICES=100; bun run examples/10-simulator.ts`
 

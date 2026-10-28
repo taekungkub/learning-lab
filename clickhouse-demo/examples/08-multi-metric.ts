@@ -21,9 +21,13 @@ for (const t of [
 // hourly     partition รายเดือน
 // daily      ไม่แบ่ง partition (เล็ก ไม่มี TTL)
 
+// CODEC: ts เรียงตาม (sensor, ..., ts) ห่างทีละ 1 วิ → Delta เก็บแค่ส่วนต่าง แทบเป็น 0 byte
+// value: ZSTD ดีสุดกับ mock (Gorilla ใหญ่กว่า LZ4 เพราะ noise สุ่ม ข้อมูลจริงที่ค่าขยับช้าอาจต่าง วัดซ้ำ)
+// วัด sensor_long 1 วัน: LZ4 default 45.2 MiB → Delta+ZSTD / ZSTD 11.8 MiB (3.8 เท่า), query 53 → 44 ms
+
 // 1) raw: เก็บ payload ทั้งก้อน ClickHouse แยกแต่ละ key เป็น subcolumn ให้เอง
 await ch.command({
-  query: `CREATE TABLE sensor_raw (ts DateTime, sensor LowCardinality(String), data JSON)
+  query: `CREATE TABLE sensor_raw (ts DateTime CODEC(Delta, ZSTD(1)), sensor LowCardinality(String), data JSON)
           ENGINE = MergeTree PARTITION BY toYYYYMMDD(ts) ORDER BY (sensor, ts)
           TTL ts + ${ttlSql(TTL.raw)}
           SETTINGS ttl_only_drop_parts = 1`,
@@ -32,7 +36,10 @@ await ch.command({
 // 2) long format: 1 แถวต่อ 1 metric รับ sensor/key ใหม่ได้โดยไม่ต้อง ALTER
 await ch.command({
   query: `CREATE TABLE sensor_long (
-            ts DateTime, sensor LowCardinality(String), metric LowCardinality(String), value Float64
+            ts     DateTime CODEC(Delta, ZSTD(1)),
+            sensor LowCardinality(String),
+            metric LowCardinality(String),
+            value  Float64 CODEC(ZSTD(1))
           ) ENGINE = MergeTree PARTITION BY toYYYYMMDD(ts) ORDER BY (sensor, metric, ts)
           TTL ts + ${ttlSql(TTL.long)}
           SETTINGS ttl_only_drop_parts = 1`,

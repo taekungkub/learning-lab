@@ -59,6 +59,14 @@ dedupe/aggregate เกิด **ตอน merge** ซึ่งไม่รู้
 - TTL ยาวขึ้นตามชั้น: raw 7 วัน → long 30 วัน → hourly 2 ปี → daily ไม่ลบ ลบชั้นล่างไม่กระทบชั้นบน
 - ห้าม `PARTITION BY` ตาม device: 10k device = 10k partition, insert แตกเป็นหลายพัน part
 
+## Codec (ex 08)
+
+- ClickHouse บีบทุกคอลัมน์ด้วย LZ4 อยู่แล้ว แต่ LZ4 หาก้อนซ้ำ เวลาที่เพิ่มทีละ 1 วิไม่มีก้อนซ้ำ บีบได้ 1 เท่า
+- `ts`: `CODEC(Delta, ZSTD(1))` เก็บส่วนต่าง (เรียงตาม ORDER BY แล้วเป็น 1 แทบทั้งหมด) 676 MiB → 834 KiB
+- `value`: ทดสอบกับ mock แล้ว `ZSTD(1)` ดีสุด `Gorilla` ใหญ่กว่า LZ4 (noise สุ่มทำให้ค่าติดกันกระโดด) ข้อมูลจริงวัดซ้ำ
+- `sensor_long` 30 วัน: 1.29 GiB → 356.65 MiB, query scan รายชั่วโมงเร็วขึ้นเล็กน้อย (อ่าน disk น้อยลง)
+- แก้ทีหลังได้: `ALTER TABLE ... MODIFY COLUMN ts DateTime CODEC(...)` (part เดิมบีบใหม่ตอน merge) ไม่เหมือน ORDER BY / PARTITION BY
+
 ## Q&A
 
 - **ทำไม ex 03 ใช้ sum() ไม่ใช่ count()?** `count()` อาจถูกตอบจาก metadata/primary index (`_exact_count_projection`) โดยไม่อ่านข้อมูล plan เลยไม่สะท้อนการ scan จริง

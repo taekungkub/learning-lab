@@ -4,16 +4,21 @@
 // แต่ละตารางมีข้อมูลเต็มช่วง TTL ของตัวเอง (src/config.ts) เหมือนระบบที่รันมาแล้ว 5 ปี:
 //   sensor_raw     ช่วง TTL.raw ล่าสุด          payload JSON  MV ต่อเป็น long → hourly → daily
 //   sensor_long    TTL.raw .. TTL.long          ค่าดิบ         MV ต่อเป็น hourly → daily
-//   sensor_hourly  TTL.long .. TTL.hourly       aggregate รายวินาทีฝั่ง server  MV ต่อเป็น daily
-//   sensor_daily   TTL.hourly .. 5 ปี            aggregate รายวินาทีตรงเป็นรายวัน
+//   sensor_hourly  TTL.long .. TTL.hourly       aggregate ฝั่ง server  MV ต่อเป็น daily
+//   sensor_daily   TTL.hourly .. YEARS          aggregate ตรงเป็นรายวัน
 // ไม่สร้างข้อมูลที่ TTL จะลบทิ้งอยู่ดี เช่นไม่เขียน hourly เก่ากว่า TTL.hourly
-// insert ทีละก้อนเล็ก: client timeout 30 วิ
+//
+// hourly/daily สร้างค่าทุก COARSE วิ แล้วนับแต่ละค่าเป็น COARSE จุด (state ของค่าซ้ำ):
+// n ยังเท่ารายวินาที, avg แทบเท่าเดิม, min/max แคบลงนิดหน่อย (noise สุดขั้วถูกสุ่มเจอน้อยลง)
+// วัดช่วง 10 วัน: รายวินาที 7.8s → ทุก 60 วิ 0.27s  ตั้ง COARSE=1 ถ้าต้องการรายวินาทีจริง
+// insert ทีละก้อน: client timeout 30 วิ
 import { ch, rows } from "../src/ch";
 import { TTL } from "../src/config";
 import { longSql, makeDevices, rawSql } from "../src/mock";
 
 // เกิน TTL.hourly (2 ปี) มีแค่ใน sensor_daily: 3 ปีพอให้เห็นรายปีเกินช่วง hourly
 const YEARS = Number(process.env.YEARS ?? 3);
+const COARSE = Number(process.env.COARSE ?? 60);
 const devices = makeDevices(Number(process.env.DEVICES ?? 10));
 const LONG = longSql(devices);
 
@@ -30,16 +35,20 @@ const tLong = now - TTL.long.days * DAY;
 const tHourly = yearsAgo(TTL.hourly.years);
 const tStart = yearsAgo(YEARS);
 
+// แต่ละค่า = state ของ COARSE ค่าซ้ำ แล้ว merge ต่อ bucket
 const agg = (bucket: string) =>
-  `countState() AS samples, avgState(value) AS avg_v, min(value) AS min_v, max(value) AS max_v
-   FROM (${LONG}) GROUP BY ${bucket}, sensor, metric`;
+  `countMergeState(arrayReduce('countState', arrayWithConstant(${COARSE}, value))) AS samples,
+   avgMergeState(arrayReduce('avgState', arrayWithConstant(${COARSE}, value))) AS avg_v,
+   min(value) AS min_v, max(value) AS max_v
+   FROM (${longSql(devices, COARSE)}) GROUP BY ${bucket}, sensor, metric`;
+// step = วินาทีต่อจุด: n ที่ส่งเข้า numbers() = ช่วงเวลา ÷ step
 const TIERS = [
-  { table: "sensor_daily", from: tStart, to: tHourly, chunk: 10 * DAY,
+  { table: "sensor_daily", from: tStart, to: tHourly, chunk: 60 * DAY, step: COARSE,
     sql: `INSERT INTO sensor_daily SELECT toDate(ts, 'Asia/Bangkok') AS day, sensor, metric, ${agg("day")}` },
-  { table: "sensor_hourly", from: tHourly, to: tLong, chunk: 10 * DAY,
+  { table: "sensor_hourly", from: tHourly, to: tLong, chunk: 60 * DAY, step: COARSE,
     sql: `INSERT INTO sensor_hourly SELECT toStartOfHour(ts) AS hour, sensor, metric, ${agg("hour")}` },
-  { table: "sensor_long", from: tLong, to: tRaw, chunk: DAY / 4, sql: `INSERT INTO sensor_long ${LONG}` },
-  { table: "sensor_raw", from: tRaw, to: now, chunk: DAY / 4, sql: `INSERT INTO sensor_raw ${rawSql(devices)}` },
+  { table: "sensor_long", from: tLong, to: tRaw, chunk: DAY / 4, step: 1, sql: `INSERT INTO sensor_long ${LONG}` },
+  { table: "sensor_raw", from: tRaw, to: now, chunk: DAY / 4, step: 1, sql: `INSERT INTO sensor_raw ${rawSql(devices)}` },
 ];
 
 for (const t of ["sensor_raw", "sensor_long", "sensor_hourly", "sensor_daily"]) await ch.command({ query: `TRUNCATE TABLE ${t}` });
@@ -49,7 +58,8 @@ for (const tier of TIERS) {
   const t0 = performance.now();
   let chunks = 0;
   for (let from = tier.from; from < tier.to; from += tier.chunk) {
-    await ch.command({ query: tier.sql, query_params: { from, n: Math.min(tier.chunk, tier.to - from) } });
+    const n = Math.ceil(Math.min(tier.chunk, tier.to - from) / tier.step);
+    await ch.command({ query: tier.sql, query_params: { from, n } });
     chunks++;
   }
   const sec = (performance.now() - t0) / 1000;
