@@ -160,19 +160,19 @@ ORDER BY metric, t;
 
 
 -- 6. รายวันจาก raw (ผลแบบเดียวกับข้อ 2 ไว้เทียบความเร็ว)
--- วันเก่าสุดอาจไม่ครบ: TTL 30 วันของ sensor_long ลบไปแล้วบางส่วน (ข้อ 2 อ่าน hourly ยังครบ)
+-- ได้แค่ช่วง TTL ของ sensor_long (src/config.ts) วันเก่าสุดอาจไม่ครบ ข้อ 2 อ่าน hourly ยังครบ
 SELECT toDate(ts, 'Asia/Bangkok') AS t, sensor, metric,
        count() AS n, round(avg(value), 2) AS avg, min(value) AS min, max(value) AS max
 FROM sensor_long
 WHERE sensor = 'th-1' AND metric = 'temp'
-  AND ts >= toStartOfDay(now('Asia/Bangkok')) - INTERVAL 30 DAY
+  AND ts >= toStartOfDay(now('Asia/Bangkok')) - INTERVAL 7 DAY
   AND ts <  toStartOfDay(now('Asia/Bangkok'))
 GROUP BY t, sensor, metric
 ORDER BY t;
 
 
 -- ===========================================================================
--- Query Raw (sensor_long: ค่าดิบทีละจุด เก็บแค่ 30 วัน)
+-- Query Raw (sensor_long: ค่าดิบทีละจุด เก็บตาม TTL.long ใน src/config.ts)
 -- latest = เวลาของข้อมูลล่าสุด ใช้แทน now() เพราะ demo ไม่มีข้อมูลเข้าต่อเนื่อง
 -- ระบบจริงเปลี่ยน latest เป็น now()
 -- ===========================================================================
@@ -391,6 +391,34 @@ FROM system.parts
 WHERE database = 'demo' AND active AND table IN ('sensor_raw', 'sensor_long', 'sensor_hourly')
 ORDER BY table, partition
 LIMIT 1 BY table;
+
+
+-- ---------------------------------------------------------------------------
+-- disk ที่ใช้ต่อตาราง (on_disk = ขนาดจริง, uncompressed = ถ้าไม่บีบอัด, ratio = บีบได้กี่เท่า)
+SELECT table,
+       sum(rows)                                        AS rows,
+       formatReadableSize(sum(bytes_on_disk))           AS on_disk,
+       formatReadableSize(sum(data_uncompressed_bytes)) AS uncompressed,
+       round(sum(data_uncompressed_bytes) / sum(data_compressed_bytes), 1) AS ratio
+FROM system.parts
+WHERE database = 'demo' AND active
+GROUP BY table
+ORDER BY sum(bytes_on_disk) DESC;
+
+-- disk ที่ใช้ต่อคอลัมน์ (หาว่าคอลัมน์ไหนกินที่ / ควรเปลี่ยน codec)
+SELECT table, name, type, compression_codec,
+       formatReadableSize(data_compressed_bytes)   AS on_disk,
+       formatReadableSize(data_uncompressed_bytes) AS uncompressed
+FROM system.columns
+WHERE database = 'demo' AND table = 'sensor_long'
+ORDER BY data_compressed_bytes DESC;
+
+-- disk ทั้งเครื่อง (ใน Docker = disk ของ volume)
+SELECT name, path,
+       formatReadableSize(free_space)  AS free,
+       formatReadableSize(total_space) AS total,
+       round(100 * (1 - free_space / total_space), 1) AS used_pct
+FROM system.disks;
 
 
 -- ---------------------------------------------------------------------------

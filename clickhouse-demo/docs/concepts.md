@@ -56,7 +56,9 @@ dedupe/aggregate เกิด **ตอน merge** ซึ่งไม่รู้
 - ลบตอน merge ไม่ตรงเวลา query ที่ต้องการ n วันพอดีให้ใส่ `WHERE` เอง
 - ตารางใหญ่: partition ให้ขนาดใกล้ช่วง TTL + `ttl_only_drop_parts = 1` เพื่อลบทั้ง partition ไม่ต้องเขียน part ใหม่
 - จำนวน partition คงที่ (≈ TTL ÷ ขนาด partition) ที่โตคือขนาดต่อ partition
-- TTL ยาวขึ้นตามชั้น: raw 7 วัน → long 30 วัน → hourly 2 ปี → daily ไม่ลบ ลบชั้นล่างไม่กระทบชั้นบน
+- TTL ยาวขึ้นตามชั้น: raw 3 วัน → long 7 วัน → hourly 2 ปี → daily ไม่ลบ ลบชั้นล่างไม่กระทบชั้นบน (ค่าอยู่ที่ `src/config.ts`)
+- ลด long จาก 30 เหลือ 7 วัน เพราะที่ 10k device ส่งทุก 1 วิ long ~12 GiB/วัน (30 วัน ~350 GiB → 7 วัน ~85 GiB)
+  dashboard ใช้ hourly/daily อยู่แล้ว ค่ารายวินาทีย้อนหลังเกิน 7 วันไม่ค่อยได้ใช้
 - ห้าม `PARTITION BY` ตาม device: 10k device = 10k partition, insert แตกเป็นหลายพัน part
 
 ## Codec (ex 08)
