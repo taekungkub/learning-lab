@@ -384,6 +384,19 @@ LIMIT 1 BY table;
 
 
 -- ---------------------------------------------------------------------------
+-- part ใน partition (แก้ table / partition ตามที่อยากดู)
+-- name = partition_บล็อกแรก_บล็อกสุดท้าย_level (level > 0 = มาจาก merge)
+-- min_time/max_time = ช่วงเวลาใน part (MinMax ใช้ข้าม part ตอน query)
+-- drop_after = TTL ลบ part นี้ทั้งก้อนได้หลังเวลานี้ (แถวใหม่สุดใน part หมดอายุ)
+SELECT partition, name, rows, formatReadableSize(bytes_on_disk) AS size,
+       min_time, max_time, delete_ttl_info_max AS drop_after, level
+FROM system.parts
+WHERE database = 'demo' AND table = 'sensor_long' AND active
+  AND partition = '20261028'
+ORDER BY name;
+
+
+-- ---------------------------------------------------------------------------
 -- partition / part ของแต่ละตาราง
 SELECT table, partition, count() AS parts, sum(rows) AS rows,
        formatReadableSize(sum(bytes_on_disk)) AS size
