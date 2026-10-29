@@ -26,7 +26,7 @@ bun run examples/04-replacing-merge-tree.ts  # upsert แบบ ClickHouse: Repl
 bun run examples/05-materialized-view.ts     # MV + AggregatingMergeTree (sumState/uniqState → -Merge)
 bun run examples/06-update-delete.ts         # (หลัง 01) lightweight DELETE, ALTER UPDATE mutation
 bun run examples/07-hourly-rollup.ts         # insert ทุก 1 วิ + MV hourly, ดู state ย่อยถูก merge, view สำหรับ GUI
-bun run examples/08-multi-metric.ts          # sensor key ต่างกัน: raw JSON → MV แตกเป็น long format → hourly → daily (เวลาไทย)
+bun run examples/08-multi-metric.ts          # sensor key ต่างกัน: raw JSON → MV แตกเป็น long format → hourly → daily (วัน UTC)
 bun run examples/09-query-service.ts         # (หลัง 11) getStats(): hour/day จาก hourly, month/year จาก daily (อ่านอย่างเดียว)
 bun run examples/10-simulator.ts             # (หลัง 08) device ส่งทุก 1 วิ เข้า sensor_raw (Ctrl+C หยุด)
 bun run examples/11-backfill.ts              # (หลัง 08) mock ย้อนหลังรายวินาที เต็มช่วง TTL ของแต่ละตาราง

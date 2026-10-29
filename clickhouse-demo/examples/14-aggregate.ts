@@ -1,14 +1,13 @@
 // bun run examples/14-aggregate.ts              (ต้องรัน 08 + 11 ก่อน: อ่านอย่างเดียว รัน body จาก 14-body.json)
 // bun run examples/14-aggregate.ts other.json   (ส่ง body เอง)   OUT=path เปลี่ยนที่เก็บ response เต็ม
 //
-// aggregate ทั้งช่วงเวลา = 1 ค่าต่อ (device, metric) + เทียบกับอีกช่วง (compare) ได้ delta
-// อ่านจาก sensor_hourly (TTL 2 ปี); ช่วงที่เก่ากว่านั้นอ่านจาก sensor_daily แทน
-//   ponytail: daily ตัดวันตามเวลาไทย → ขอบช่วงปัดเป็นวันไทย (ไม่ตรงเป๊ะกับ UTC) / ถ้าต้องเป๊ะ ต้องมี rollup UTC เพิ่ม
-//   ponytail: compare.interval ยังไม่ใช้ (เดาไม่ออกว่าหมายถึงอะไร) / group_by รองรับแค่ ["device_id"]
+// aggregate ทั้งช่วง = 1 ค่าต่อ (device, metric) + compare กับอีกช่วงได้ delta
+// อ่าน sensor_hourly (TTL 2 ปี) ช่วงเก่ากว่านั้นอ่าน sensor_daily
+//   ponytail: daily ปัดขอบช่วงลงเป็นต้นวัน UTC (hourly ไม่ปัด)
+//   ponytail: ไม่ใช้ compare.interval / group_by รองรับแค่ ["device_id"]
 import { fileURLToPath } from "node:url";
 import { ch, rows } from "../src/ch";
-import { type Agg, DAY, toSec, utc } from "../src/api-utils";
-import { TTL } from "../src/config";
+import { type Agg, HOURLY_MAX_AGE, toSec, utc } from "../src/api-utils";
 
 type TimeRange = { from: string; to: string };
 type Body = {
@@ -24,8 +23,8 @@ type AggregateResult = {
   result: { current: Record<string, number>; compare?: Record<string, number>; delta?: Record<string, AggregateDelta> };
 };
 
-// c =เงื่อนไขของแถวใน bucket ที่นับ / p = เงื่อนไขของ bucket ก่อนหน้าช่วง (ใช้กับ diff)
-// last = ค่าล่าสุดตามเวลา (argMax) / diff = last ในช่วง - last ของ bucket ก่อนช่วง (ใช้กับ counter เช่น kWh)
+// c = เงื่อนไขแถวในช่วง / p = bucket ก่อนช่วง (ใช้กับ diff)
+// last = argMax ตามเวลา / diff = last ในช่วง − last ก่อนช่วง (ใช้กับ counter เช่น kWh)
 const AGG: Record<Agg, (c: string, p: string) => string> = {
   mean: (c) => `avgMergeIf(avg_v, ${c})`,
   avg: (c) => `avgMergeIf(avg_v, ${c})`,
@@ -37,8 +36,8 @@ const AGG: Record<Agg, (c: string, p: string) => string> = {
   diff: (c, p) => `argMaxMergeIf(last_v, ${c}) - argMaxMergeIf(last_v, ${p})`,
 };
 
-const HOURLY = { table: "sensor_hourly", time: "hour", from: "toDateTime({from:String}, 'UTC')", to: "toDateTime({to:String}, 'UTC')", step: "INTERVAL 1 HOUR" };
-const DAILY = { table: "sensor_daily", time: "day", from: "toDate(toDateTime({from:String}, 'UTC'), 'Asia/Bangkok')", to: "toDate(toDateTime({to:String}, 'UTC'), 'Asia/Bangkok')", step: "INTERVAL 1 DAY" };
+const HOURLY = { table: "sensor_hourly", time: "ts", from: "toDateTime({from:String}, 'UTC')", to: "toDateTime({to:String}, 'UTC')", step: "INTERVAL 1 HOUR" };
+const DAILY = { table: "sensor_daily", time: "ts", from: "toStartOfDay(toDateTime({from:String}, 'UTC'), 'UTC')", to: "toStartOfDay(toDateTime({to:String}, 'UTC'), 'UTC')", step: "INTERVAL 1 DAY" };
 
 const iso = (s: number) => new Date(s * 1000).toISOString().replace(".000", "");
 
@@ -60,11 +59,10 @@ function compareRange(body: Body): TimeRange | undefined {
   throw new Error('compare.mode ต้องเป็น previous_period | previous_year | custom (custom ต้องมี custom_time_range)');
 }
 
-// 1 query ต่อช่วงเวลา: 1 คอลัมน์ต่อ metric (ใช้ -If เลือกแถวของ metric นั้น) ได้ Map device → { metric: ค่า }
-// ไม่มีข้อมูลในช่วง (หรือ diff ไม่มี bucket ก่อนช่วง) = NULL = ไม่ใส่ key นั้น
+// 1 query ต่อช่วง: 1 คอลัมน์ต่อ metric (-If) → Map device → { metric: ค่า } / ไม่มีข้อมูล (หรือ diff ไม่มีก่อนช่วง) = ไม่ใส่ key
 async function aggregate(body: Body, range: TimeRange) {
   checkRange(range);
-  const t = toSec(range.from) < Date.now() / 1000 - TTL.hourly.years * 365 * DAY ? DAILY : HOURLY;
+  const t = toSec(range.from) < Date.now() / 1000 - HOURLY_MAX_AGE ? DAILY : HOURLY;
   const params: Record<string, unknown> = {
     devices: body.scope.device_ids, metrics: body.metrics.map((m) => m.metric_key), from: utc(toSec(range.from)), to: utc(toSec(range.to)),
   };
@@ -104,7 +102,7 @@ async function run(body: Body) {
     const current = cur.byDevice.get(d)!;
     const compare = cmp?.byDevice.get(d) ?? (cmp ? {} : undefined);
     const delta: Record<string, AggregateDelta> = {};
-    // compare = 0 หาร percent ไม่ได้ → ข้าม metric นั้น
+    // compare = 0 หา percent ไม่ได้ → ข้าม
     for (const [k, v] of Object.entries(current)) {
       const c = compare?.[k];
       if (c !== undefined && c !== 0) delta[k] = { absolute: Math.round((v - c) * 1000) / 1000, percent: Math.round(((v - c) / Math.abs(c)) * 10000) / 100 };
@@ -119,7 +117,7 @@ const file = process.argv[2];
 const body: Body = await Bun.file(file ?? new URL("./14-body.json", import.meta.url)).json();
 const r = await run(body);
 console.log(JSON.stringify({ ...r, results: [...r.results.slice(0, 2), `... ${r.results.length} device`] }, null, 2));
-// self-check เฉพาะ body เริ่มต้น: pm-1 rate 1.05 → energy เพิ่ม 10.5 kWh/ชม. × (455 วัน × 24) = 114,660
+// self-check (body เริ่มต้น): pm-1 เพิ่ม 10.5 kWh/ชม. × 455 วัน × 24 = 114,660
 if (!file) console.assert(r.results.find((x) => x.group.device_id === "pm-1")?.result.current.energy_kwh === 114660, "energy_kwh ของ pm-1 ไม่ตรง 114660");
 const out = process.env.OUT ?? fileURLToPath(new URL("./14-response.json", import.meta.url));
 await Bun.write(out, JSON.stringify(r, null, 2));

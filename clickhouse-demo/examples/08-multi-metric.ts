@@ -6,6 +6,8 @@
 //                                                │                          ▲ sensor_hourly_v       ▲ sensor_daily_v
 //                                                └──MV──► sensor_1m (interval 1m-30m, TTL 3 วัน)
 // ทุกตารางสรุปมี last_v (argMaxState(value, ts)) = ค่าล่าสุดของ bucket ใช้กับ aggregation last / diff
+// column เวลาชื่อ ts (DateTime UTC) ทุกตาราง: 1m = ต้นนาที, hourly = ต้นชั่วโมง, daily = 00:00Z
+// ระวัง: MV ที่ปัดเป็น `AS ts` ต้องเขียน argMaxState(value, sensor_long.ts) ไม่งั้นได้ ts ที่ปัดแล้ว ค่า last ผิดแบบเงียบๆ
 
 import { ch, rows } from "../src/ch";
 import { TTL, ttlSql } from "../src/config";
@@ -60,92 +62,92 @@ await ch.command({
 // 2b) 1 นาทีจาก long: interval 1m/5m/15m/30m รวมจากตารางนี้ (หารลงตัว) เก็บสั้นเพราะใหญ่
 await ch.command({
   query: `CREATE TABLE sensor_1m (
-            minute DateTime, sensor LowCardinality(String), metric LowCardinality(String),
+            ts DateTime, sensor LowCardinality(String), metric LowCardinality(String),
             samples AggregateFunction(count),
             avg_v   AggregateFunction(avg, Float64),
             min_v   SimpleAggregateFunction(min, Float64),
             max_v   SimpleAggregateFunction(max, Float64),
             last_v  AggregateFunction(argMax, Float64, DateTime)
-          ) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMMDD(minute) ORDER BY (sensor, metric, minute)
-          TTL minute + ${ttlSql(TTL.m1)}
+          ) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMMDD(ts) ORDER BY (sensor, metric, ts)
+          TTL ts + ${ttlSql(TTL.m1)}
           SETTINGS ttl_only_drop_parts = 1`,
 });
 await ch.command({
   query: `CREATE MATERIALIZED VIEW sensor_1m_mv TO sensor_1m AS
-          SELECT toStartOfMinute(ts) AS minute, sensor, metric,
+          SELECT toStartOfMinute(ts) AS ts, sensor, metric,
                  countState() AS samples, avgState(value) AS avg_v, min(value) AS min_v, max(value) AS max_v,
-                 argMaxState(value, ts) AS last_v
-          FROM sensor_long GROUP BY minute, sensor, metric`,
+                 argMaxState(value, sensor_long.ts) AS last_v
+          FROM sensor_long GROUP BY ts, sensor, metric`,
 });
 // view ไว้เปิดใน TablePlus (state เป็น binary)
 await ch.command({
   query: `CREATE VIEW sensor_1m_v AS
-          SELECT minute, sensor, metric, countMerge(samples) AS samples,
+          SELECT ts, sensor, metric, countMerge(samples) AS samples,
                  round(avgMerge(avg_v), 2) AS avg_v, min(min_v) AS min_v, max(max_v) AS max_v
-          FROM sensor_1m GROUP BY minute, sensor, metric`,
+          FROM sensor_1m GROUP BY ts, sensor, metric`,
 });
 
 // 3) hourly rollup จาก long (cascade: MV นี้ทำงานเมื่อ sensor_long_mv เขียนลง sensor_long)
 await ch.command({
   query: `CREATE TABLE sensor_hourly (
-            hour DateTime, sensor LowCardinality(String), metric LowCardinality(String),
+            ts DateTime, sensor LowCardinality(String), metric LowCardinality(String),
             samples AggregateFunction(count),
             avg_v   AggregateFunction(avg, Float64),
             min_v   SimpleAggregateFunction(min, Float64),
             max_v   SimpleAggregateFunction(max, Float64),
             last_v  AggregateFunction(argMax, Float64, DateTime)
-          ) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(hour) ORDER BY (sensor, metric, hour)
-          TTL hour + ${ttlSql(TTL.hourly)}
+          ) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(ts) ORDER BY (sensor, metric, ts)
+          TTL ts + ${ttlSql(TTL.hourly)}
           SETTINGS ttl_only_drop_parts = 1`,
 });
 await ch.command({
   query: `CREATE MATERIALIZED VIEW sensor_hourly_mv TO sensor_hourly AS
-          SELECT toStartOfHour(ts) AS hour, sensor, metric,
+          SELECT toStartOfHour(ts) AS ts, sensor, metric,
                  countState() AS samples, avgState(value) AS avg_v, min(value) AS min_v, max(value) AS max_v,
-                 argMaxState(value, ts) AS last_v
-          FROM sensor_long GROUP BY hour, sensor, metric`,
+                 argMaxState(value, sensor_long.ts) AS last_v
+          FROM sensor_long GROUP BY ts, sensor, metric`,
 });
 // view ไว้เปิดใน TablePlus (state เป็น binary)
 await ch.command({
   query: `CREATE VIEW sensor_hourly_v AS
-          SELECT hour, sensor, metric, countMerge(samples) AS samples,
+          SELECT ts, sensor, metric, countMerge(samples) AS samples,
                  round(avgMerge(avg_v), 2) AS avg_v, min(min_v) AS min_v, max(max_v) AS max_v
-          FROM sensor_hourly GROUP BY hour, sensor, metric`,
+          FROM sensor_hourly GROUP BY ts, sensor, metric`,
 });
 
 // 4) daily จาก hourly (cascade ชั้นที่ 2): input เป็น state แล้ว ต้องใช้ -MergeState ไม่ใช่ -State
-// ตัดวันตามเวลาไทยตั้งแต่ตอนเขียน (เปลี่ยน timezone ทีหลังต้อง rebuild) ใช้กับรายเดือน/ปี
+// ตัดวันตาม UTC ตั้งแต่ตอนเขียน (เปลี่ยน timezone ทีหลังต้อง rebuild) ใช้กับรายเดือน/ปี
 // จำเป็นจริงเมื่อจะตั้ง TTL ให้ hourly: daily ต้องมีก่อน hourly เริ่มถูกลบ
 await ch.command({
   query: `CREATE TABLE sensor_daily (
-            day Date, sensor LowCardinality(String), metric LowCardinality(String),
+            ts DateTime, sensor LowCardinality(String), metric LowCardinality(String),
             samples AggregateFunction(count),
             avg_v   AggregateFunction(avg, Float64),
             min_v   SimpleAggregateFunction(min, Float64),
             max_v   SimpleAggregateFunction(max, Float64),
             last_v  AggregateFunction(argMax, Float64, DateTime)
-          ) ENGINE = AggregatingMergeTree ORDER BY (sensor, metric, day)`,
+          ) ENGINE = AggregatingMergeTree ORDER BY (sensor, metric, ts)`,
 });
 await ch.command({
   query: `CREATE MATERIALIZED VIEW sensor_daily_mv TO sensor_daily AS
-          SELECT toDate(hour, 'Asia/Bangkok') AS day, sensor, metric,
+          SELECT toStartOfDay(ts, 'UTC') AS ts, sensor, metric,
                  countMergeState(samples) AS samples, avgMergeState(avg_v) AS avg_v,
                  min(min_v) AS min_v, max(max_v) AS max_v, argMaxMergeState(last_v) AS last_v
-          FROM sensor_hourly GROUP BY day, sensor, metric`,
+          FROM sensor_hourly GROUP BY ts, sensor, metric`,
 });
 await ch.command({
   query: `CREATE VIEW sensor_daily_v AS
-          SELECT day, sensor, metric, countMerge(samples) AS samples,
+          SELECT ts, sensor, metric, countMerge(samples) AS samples,
                  round(avgMerge(avg_v), 2) AS avg_v, min(min_v) AS min_v, max(max_v) AS max_v
-          FROM sensor_daily GROUP BY day, sensor, metric`,
+          FROM sensor_daily GROUP BY ts, sensor, metric`,
 });
 
 // ข้อมูล 3 ชั่วโมง ทุก 10 วิ: th-1 = temp/humidity/status, pm-1 = voltage/current
-// เมื่อวาน 22:00-01:00 เวลาไทย (15:00-18:00 UTC): คร่อมเที่ยงคืนไทย แต่ยังวันเดียวกันใน UTC
+// เมื่อวาน 22:00-01:00 UTC: คร่อมเที่ยงคืน UTC ให้ daily แยกเป็น 2 วัน
 // อิงวันที่รัน ไม่ fix วัน: ถ้า fix ไว้ รันเกิน 7 วันข้อมูลจะเก่ากว่า TTL แล้วถูกลบ
 const yesterday = new Date();
 yesterday.setUTCDate(yesterday.getUTCDate() - 1);
-yesterday.setUTCHours(15, 0, 0, 0);
+yesterday.setUTCHours(22, 0, 0, 0);
 const start = yesterday.getTime() / 1000;
 const r = (base: number, spread: number) => Math.round((base + Math.random() * spread) * 10) / 10;
 const payloads = Array.from({ length: (3 * 3600) / 10 }, (_, i) => {
@@ -190,40 +192,40 @@ console.log("long format (status ถูกตัดเพราะไม่ใ�
 console.table(await rows("SELECT * FROM sensor_long ORDER BY ts, sensor, metric LIMIT 4"));
 
 console.log("hourly ต่อ sensor ต่อ metric:");
-const hourly = await rows("SELECT * FROM sensor_hourly_v ORDER BY sensor, metric, hour");
+const hourly = await rows("SELECT * FROM sensor_hourly_v ORDER BY sensor, metric, ts");
 console.table(hourly);
 
 // pivot กลับเป็นคอลัมน์ ถ้า dashboard อยากได้ 1 แถวต่อชั่วโมง
 console.log("pivot th-1:");
 console.table(
   await rows(`
-    SELECT hour, anyIf(avg_v, metric = 'temp') AS temp, anyIf(avg_v, metric = 'humidity') AS humidity
-    FROM sensor_hourly_v WHERE sensor = 'th-1' GROUP BY hour ORDER BY hour`),
+    SELECT ts, anyIf(avg_v, metric = 'temp') AS temp, anyIf(avg_v, metric = 'humidity') AS humidity
+    FROM sensor_hourly_v WHERE sensor = 'th-1' GROUP BY ts ORDER BY ts`),
 );
 
 // self-check: hourly ผ่าน 2 MV ต้องตรงกับคำนวณจาก JSON raw ตรงๆ
 const fromRaw = await rows(`
-  SELECT toStartOfHour(ts) AS hour, sensor, kv.1 AS metric, count() AS samples,
+  SELECT toStartOfHour(ts) AS ts, sensor, kv.1 AS metric, count() AS samples,
          round(avg(kv.2), 2) AS avg_v, min(kv.2) AS min_v, max(kv.2) AS max_v
   FROM sensor_raw
   ARRAY JOIN JSONExtractKeysAndValues(toJSONString(data), 'Nullable(Float64)') AS kv
   WHERE kv.2 IS NOT NULL
-  GROUP BY hour, sensor, metric ORDER BY sensor, metric, hour`);
+  GROUP BY ts, sensor, metric ORDER BY sensor, metric, ts`);
 const same = JSON.stringify(hourly) === JSON.stringify(fromRaw);
 console.assert(same, "hourly ไม่ตรงกับ raw");
 console.log("hourly ตรงกับ raw:", same);
 
-// daily: แยกเป็น 2 วันตามเวลาไทย (เมื่อวาน 22:00-23:59, วันนี้ 00:00-00:59)
-console.log("daily (วันตามเวลาไทย):");
-const daily = await rows("SELECT * FROM sensor_daily_v ORDER BY sensor, metric, day");
+// daily: แยกเป็น 2 วันตาม UTC (เมื่อวาน 22:00-23:59, วันนี้ 00:00-00:59)
+console.log("daily (วัน UTC):");
+const daily = await rows("SELECT * FROM sensor_daily_v ORDER BY sensor, metric, ts");
 console.table(daily);
 const dailyFromRaw = await rows(`
-  SELECT toDate(ts, 'Asia/Bangkok') AS day, sensor, kv.1 AS metric, count() AS samples,
+  SELECT toStartOfDay(ts, 'UTC') AS ts, sensor, kv.1 AS metric, count() AS samples,
          round(avg(kv.2), 2) AS avg_v, min(kv.2) AS min_v, max(kv.2) AS max_v
   FROM sensor_raw
   ARRAY JOIN JSONExtractKeysAndValues(toJSONString(data), 'Nullable(Float64)') AS kv
   WHERE kv.2 IS NOT NULL
-  GROUP BY day, sensor, metric ORDER BY sensor, metric, day`);
+  GROUP BY ts, sensor, metric ORDER BY sensor, metric, ts`);
 const sameDaily = JSON.stringify(daily) === JSON.stringify(dailyFromRaw);
 console.assert(sameDaily, "daily ไม่ตรงกับ raw");
 console.log("daily ตรงกับ raw:", sameDaily);
@@ -232,7 +234,7 @@ console.log("daily ตรงกับ raw:", sameDaily);
 console.log("รายเดือน / รายปี จาก daily:");
 console.table(
   await rows(`
-    SELECT toStartOfMonth(day) AS month, toYear(day) AS year, sensor, metric,
+    SELECT toStartOfMonth(ts) AS month, toYear(ts) AS year, sensor, metric,
            countMerge(samples) AS n, round(avgMerge(avg_v), 2) AS avg, min(min_v) AS min, max(max_v) AS max
     FROM sensor_daily GROUP BY month, year, sensor, metric ORDER BY sensor, metric`),
 );

@@ -3,12 +3,11 @@
 // RUNS=10 CONCURRENCY=5 bun run examples/13-api-body.ts   (ยิงซ้ำ / ยิงพร้อมกัน)
 // SUITE=1 bun run examples/13-api-body.ts         (ชุดทดสอบทุก interval)
 //
-// รับ body รูปแบบเดียวกับ API ระบบเก่า แล้วแปลงเป็น query บนตารางสรุป
-// เลือกตารางตาม interval: 1m/15m → sensor_1m (TTL 3 วัน), 1h-7d → sensor_hourly (TTL 2 ปี)
-// bucket ตัดตาม UTC (body ส่งเวลา Z มา): 24h = วัน UTC (เริ่ม 07:00 ไทย), 7d = จันทร์-อาทิตย์ UTC
+// body แบบ API ระบบเก่า → query บนตารางสรุป: 1m/15m ใช้ sensor_1m (TTL 3 วัน), 1h-7d ใช้ sensor_hourly (TTL 2 ปี)
+// bucket ตัดตาม UTC: 24h = วัน UTC (07:00 ไทย), 7d = จันทร์-อาทิตย์ UTC
 import { fileURLToPath } from "node:url";
 import { ch, rows } from "../src/ch";
-import { type Agg, DAY, toSec, utc } from "../src/api-utils";
+import { type Agg, DAY, HOURLY_MAX_AGE, isoZ, toSec, utc } from "../src/api-utils";
 import { TTL } from "../src/config";
 
 type Interval = "1m" | "15m" | "1h" | "6h" | "12h" | "24h" | "7d";
@@ -24,25 +23,25 @@ type Body = {
   }[];
 };
 
-// response: 1 เส้นกราฟต่อ object (group ครั้งเดียว) / meta = สรุปต่อ series ของ request ไว้ debug
+// response: 1 object = 1 เส้นกราฟ / meta = สรุปต่อ series ไว้ debug
 type RawSeriesResponse = { name: string; group: Record<string, string>; points: [string, number | null][] };
 type Meta = { name: string; aggregation: Agg; interval: Interval; source: string; points_per_series: number; lines: number; rows: number };
 type Row = { t: string; sensor?: string; metric?: string; value: number | null };
 
-// จุดต่อ series (ต่อ device ต่อ metric) ที่ FE render ไหว / SUITE ใช้ 5000 เพื่อให้ case "เกิน MAX_POINTS" ยังทดสอบได้
+// จุดต่อเส้นสูงสุด (SUITE ใช้ 5000 ให้ case "เกิน MAX_POINTS" ทดสอบได้)
 const MAX_POINTS = Number(process.env.MAX_POINTS ?? (process.env.SUITE ? 5000 : 20000));
 
 // interval → ตาราง + bucket (whitelist) / maxAge = ย้อนหลังได้ตาม TTL ของตารางนั้น
-const M1 = { table: "sensor_1m", time: "minute", maxAge: TTL.m1.days * DAY } as const;
-const H = { table: "sensor_hourly", time: "hour", maxAge: TTL.hourly.years * 365 * DAY } as const;
-const INTERVALS: Record<Interval, { table: string; time: string; maxAge: number; sec: number; bucket: string }> = {
-  "1m": { ...M1, sec: 60, bucket: "minute" },
-  "15m": { ...M1, sec: 900, bucket: "toStartOfFifteenMinutes(minute)" },
-  "1h": { ...H, sec: 3600, bucket: "hour" },
-  "6h": { ...H, sec: 6 * 3600, bucket: "toStartOfInterval(hour, INTERVAL 6 HOUR, 'UTC')" },
-  "12h": { ...H, sec: 12 * 3600, bucket: "toStartOfInterval(hour, INTERVAL 12 HOUR, 'UTC')" },
-  "24h": { ...H, sec: DAY, bucket: "toStartOfDay(hour, 'UTC')" },
-  "7d": { ...H, sec: 7 * DAY, bucket: "toDateTime(toMonday(hour, 'UTC'), 'UTC')" },
+const M1 = { table: "sensor_1m", maxAge: TTL.m1.days * DAY } as const;
+const H = { table: "sensor_hourly", maxAge: HOURLY_MAX_AGE } as const;
+const INTERVALS: Record<Interval, { table: string; maxAge: number; sec: number; bucket: string }> = {
+  "1m": { ...M1, sec: 60, bucket: "ts" },
+  "15m": { ...M1, sec: 900, bucket: "toStartOfFifteenMinutes(ts)" },
+  "1h": { ...H, sec: 3600, bucket: "ts" },
+  "6h": { ...H, sec: 6 * 3600, bucket: "toStartOfInterval(ts, INTERVAL 6 HOUR, 'UTC')" },
+  "12h": { ...H, sec: 12 * 3600, bucket: "toStartOfInterval(ts, INTERVAL 12 HOUR, 'UTC')" },
+  "24h": { ...H, sec: DAY, bucket: "toStartOfDay(ts, 'UTC')" },
+  "7d": { ...H, sec: 7 * DAY, bucket: "toDateTime(toMonday(ts, 'UTC'), 'UTC')" },
 };
 
 // aggregation → expression บน state (whitelist) เหมือนกันทั้ง sensor_1m และ sensor_hourly
@@ -88,8 +87,8 @@ function plan(body: Body, s: Body["series"][number]) {
     SELECT ${iv.bucket} AS t${cols}, ${AGG[s.aggregation]} AS value
     FROM ${iv.table}
     WHERE has({devices:Array(String)}, sensor) AND has({metrics:Array(String)}, metric)
-      AND ${iv.time} >= toDateTime({from:String}, 'UTC') ${diff ? `- INTERVAL ${iv.sec} SECOND` : ""}
-      AND ${iv.time} <  toDateTime({to:String}, 'UTC')
+      AND ts >= toDateTime({from:String}, 'UTC') ${diff ? `- INTERVAL ${iv.sec} SECOND` : ""}
+      AND ts <  toDateTime({to:String}, 'UTC')
     GROUP BY t${cols}`;
   const order = `ORDER BY ${[...by, "t"].join(", ")}`;
   const sql = !diff
@@ -111,7 +110,7 @@ async function run(body: Body) {
   const results = await Promise.all(
     plans.map(async ({ s, p }) => ({ s, p, data: await rows<Row>(p.sql, { ...p.params, devices }) })),
   );
-  // 1 เส้นกราฟ = 1 (series × group): group ใส่ครั้งเดียว แต่ละจุดเป็น [เวลา ISO UTC, ค่า] (diff bucket แรกอาจเป็น null)
+  // 1 เส้น = 1 (series × group) จุดละ [เวลา ISO UTC, ค่า] (diff bucket แรกเป็น null)
   const series: RawSeriesResponse[] = [];
   const meta: Meta[] = [];
   for (const { s, p, data } of results) {
@@ -120,7 +119,7 @@ async function run(body: Body) {
       const group = Object.fromEntries(s.group_by.map((g) => [g, String(r[GROUP[g]])]));
       const key = JSON.stringify(group);
       if (!lines.has(key)) lines.set(key, { name: s.name, group, points: [] });
-      lines.get(key)!.points.push([`${r.t.replace(" ", "T")}Z`, r.value]);
+      lines.get(key)!.points.push([isoZ(r.t), r.value]);
     }
     series.push(...lines.values());
     meta.push({ name: s.name, aggregation: s.aggregation, interval: s.interval, source: p.source,
@@ -146,10 +145,10 @@ const file = process.argv[2];
 if (!process.env.SUITE) {
   const body: Body = await Bun.file(file ?? new URL("./13-body.json", import.meta.url)).json();
   const r = await run(body);
-  // terminal: 2 เส้นแรก เส้นละ 3 จุดแรก (ที่เหลือเขียนลงไฟล์)
+  // terminal แสดง 2 เส้นแรก เส้นละ 3 จุด / ที่เหลืออยู่ในไฟล์
   const head = r.series.slice(0, 2).map((l) => ({ ...l, points: [...l.points.slice(0, 3), `... ${l.points.length} จุด`] }));
   console.log(JSON.stringify({ took_ms: r.took_ms, meta: r.meta, series: [...head, `... ${r.series.length} เส้น`] }, null, 2));
-  // response เต็ม (ไม่ตัด) เขียนลงไฟล์ เปิดดู/ส่งต่อได้ (OUT=path เปลี่ยนที่เก็บ)
+  // response เต็มลงไฟล์ (OUT=path เปลี่ยนที่เก็บ)
   const out = process.env.OUT ?? fileURLToPath(new URL("./13-response.json", import.meta.url));
   await Bun.write(out, JSON.stringify(r, null, 2));
   console.log(`response เต็ม → ${out}`);

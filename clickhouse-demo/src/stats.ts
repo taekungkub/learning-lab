@@ -1,20 +1,23 @@
 import { rows } from "./ch";
 
 // grain → ตารางต้นทาง + expression ของ bucket (whitelist: ห้ามรับ SQL จาก caller)
-// hour/day อ่าน sensor_hourly (TTL 2 ปี) ตัดเวลาไทยตอน query
-// month/year อ่าน sensor_daily (ไม่มี TTL, วันไทยถูกตัดไว้ตอน MV เขียน) ดูย้อนหลังได้เกิน 2 ปี
+// ทุกอย่างเป็น UTC (sensor_daily ตัดวัน UTC ตอน MV เขียน) / column เวลาชื่อ ts ทุกตาราง
+// hour/day อ่าน sensor_hourly (TTL 2 ปี) / month/year อ่าน sensor_daily (ไม่มี TTL)
+// t ทุก grain เป็น ISO UTC ("2026-10-21T00:00:00Z") day/month/year = 00:00Z ของวัน/วันที่ 1/1 ม.ค.
+// range = ชนิดช่วงใน RANGE: "exact" = เทียบเวลาตรงๆ, "day" = ปัด from/to ลงเป็นต้นวัน
+const ISO = "'%Y-%m-%dT%H:%i:%SZ'";
 const GRAIN = {
-  hour: { table: "sensor_hourly", time: "hour", bucket: "toTimeZone(hour, 'Asia/Bangkok')" },
-  day: { table: "sensor_hourly", time: "hour", bucket: "toDate(hour, 'Asia/Bangkok')" },
-  month: { table: "sensor_daily", time: "day", bucket: "toStartOfMonth(day)" },
-  year: { table: "sensor_daily", time: "day", bucket: "toYear(day)" },
+  hour: { table: "sensor_hourly", range: "exact", bucket: `formatDateTime(ts, ${ISO}, 'UTC')` },
+  day: { table: "sensor_hourly", range: "exact", bucket: `formatDateTime(toStartOfDay(ts, 'UTC'), ${ISO}, 'UTC')` },
+  month: { table: "sensor_daily", range: "day", bucket: `formatDateTime(toStartOfMonth(ts, 'UTC'), ${ISO})` },
+  year: { table: "sensor_daily", range: "day", bucket: `formatDateTime(toStartOfYear(ts, 'UTC'), ${ISO})` },
 } as const;
 export type Grain = keyof typeof GRAIN;
 
-// from/to ตามชนิดคอลัมน์เวลา: hour = DateTime (UTC), day = Date (วันไทยอยู่แล้ว)
+// from/to รับ ISO "…Z" หรือ 'YYYY-MM-DD HH:MM:SS' (ตีเป็น UTC)
 const RANGE = {
-  hour: "hour >= toDateTime({from:String}, 'Asia/Bangkok') AND hour < toDateTime({to:String}, 'Asia/Bangkok')",
-  day: "day >= toDate(toDateTime({from:String}, 'Asia/Bangkok')) AND day < toDate(toDateTime({to:String}, 'Asia/Bangkok'))",
+  exact: "ts >= parseDateTimeBestEffort({from:String}, 'UTC') AND ts < parseDateTimeBestEffort({to:String}, 'UTC')",
+  day: "ts >= toStartOfDay(parseDateTimeBestEffort({from:String}, 'UTC'), 'UTC') AND ts < toStartOfDay(parseDateTimeBestEffort({to:String}, 'UTC'), 'UTC')",
 } as const;
 
 // groupBy → คอลัมน์ที่แยกกลุ่ม (whitelist เหมือน GRAIN)
@@ -31,12 +34,12 @@ export type StatsQuery = {
   metrics?: string[]; // ว่าง = ทุก metric
   grain: Grain;
   groupBy?: GroupBy; // default "device"
-  from: string; // เวลาไทย 'YYYY-MM-DD HH:MM:SS' (รวม)
+  from: string; // UTC: ISO "2026-10-21T00:00:00Z" หรือ 'YYYY-MM-DD HH:MM:SS' (รวม)
   to: string; // ไม่รวม / month, year ใช้แค่ส่วนวันที่
 };
 
 export type StatsRow = {
-  t: string | number; // hour "YYYY-MM-DD HH:MM:SS", day "YYYY-MM-DD", month วันแรกของเดือน, year ตัวเลข
+  t: string; // ISO UTC ทุก grain เช่น "2026-10-27T00:00:00Z" (day = 00:00, month = วันที่ 1, year = 1 ม.ค.)
   sensor?: string; // groupBy "device"
   devices?: number; // groupBy "fleet": จำนวน device ที่มีข้อมูลใน bucket นั้น
   metric: string;
@@ -54,7 +57,7 @@ export type StatsResponse = {
     groupBy: GroupBy;
     from: string;
     to: string;
-    tz: "Asia/Bangkok";
+    tz: "UTC";
     source: "sensor_hourly" | "sensor_daily";
     sensors: string[]; // ที่ขอมา ([] = ทุก device)
     metrics: string[]; // ที่ขอมา ([] = ทุก metric)
@@ -69,32 +72,32 @@ export type StatsResponse = {
 // 1) device เดียว หลาย metric
 // getStats({ sensors: ["th-1"], metrics: ["temp", "humidity"], grain: "hour", from: "2026-10-27 00:00:00", to: "2026-10-28 00:00:00" })
 // {
-//   meta: { grain: "hour", groupBy: "device", from: "2026-10-27 00:00:00", to: "2026-10-28 00:00:00", tz: "Asia/Bangkok",
+//   meta: { grain: "hour", groupBy: "device", from: "2026-10-27T00:00:00Z", to: "2026-10-28T00:00:00Z", tz: "UTC",
 //           source: "sensor_hourly", sensors: ["th-1"], metrics: ["temp", "humidity"], rows: 48, took_ms: 39 },
 //   data: [
-//     { t: "2026-10-27 00:00:00", sensor: "th-1", metric: "humidity", n: 3600, avg: 71.74, min: 68.73, max: 74.73, sum: 258256.31, diff: null },
-//     { t: "2026-10-27 01:00:00", sensor: "th-1", metric: "humidity", n: 3600, avg: 73.04, min: 70,    max: 76,    sum: 262941.92, diff: 1.3 },
+//     { t: "2026-10-27T00:00:00Z", sensor: "th-1", metric: "humidity", n: 3600, avg: 71.74, min: 68.73, max: 74.73, sum: 258256.31, diff: null },
+//     { t: "2026-10-27T01:00:00Z", sensor: "th-1", metric: "humidity", n: 3600, avg: 73.04, min: 70,    max: 76,    sum: 262941.92, diff: 1.3 },
 //     ... 24 ชม. × 2 metric (diff เริ่มใหม่ต่อ series)
 //   ]
 // }
 //
 // 2) หลาย device → data 1 แถวต่อ (sensor, metric, t)
 // getStats({ sensors: ["th-1", "th-2", "th-3"], metrics: ["temp"], grain: "day", ...7 วัน })
-//   data: [{ t: "2026-10-21", sensor: "th-1", metric: "temp", n: 86400, avg: 22.23, ... }, ... 3 × 7 แถว]
+//   data: [{ t: "2026-10-21T00:00:00Z", sensor: "th-1", metric: "temp", n: 86400, avg: 22.23, ... }, ... 3 × 7 แถว]
 //
 //   toSeries(data) → กราฟเส้น 1 series ต่อ (sensor, metric)
 //   [{ key: "th-1.temp", sensor: "th-1", metric: "temp",
-//      points: [{ t: "2026-10-21", n: 86400, avg: 22.23, min: 18.22, max: 26.24, sum: 1920562.98, diff: null }, ...] }, ...]
+//      points: [{ t: "2026-10-21T00:00:00Z", n: 86400, avg: 22.23, min: 18.22, max: 26.24, sum: 1920562.98, diff: null }, ...] }, ...]
 //
 //   toWide(data, "avg") → ตาราง/CSV 1 แถวต่อ t
-//   [{ t: "2026-10-21", "th-1.temp": 22.23, "th-2.temp": 23.24, "th-3.temp": 24.23 }, ...]
+//   [{ t: "2026-10-21T00:00:00Z", "th-1.temp": 22.23, "th-2.temp": 23.24, "th-3.temp": 24.23 }, ...]
 //
 // 3) กลุ่ม device รวมเป็นค่าเดียว (groupBy "fleet" + sensors) / ทั้ง fleet (sensors ว่าง)
 // getStats({ sensors: ["pm-1", "pm-2"], metrics: ["power_kw"], grain: "month", groupBy: "fleet", ... })  อ่าน sensor_daily
-//   data: [{ t: "2023-10-01", metric: "power_kw", devices: 2, n: 576000, avg: 8.8, min: 3.93, max: 13.43, sum: 5071146.6, diff: null }, ...]
+//   data: [{ t: "2023-10-01T00:00:00Z", metric: "power_kw", devices: 2, n: 576000, avg: 8.8, min: 3.93, max: 13.43, sum: 5071146.6, diff: null }, ...]
 //
-// 4) รายปี t เป็นตัวเลข อ่าน sensor_daily (เกิน TTL hourly 2 ปีได้)
-//   data: [{ t: 2023, sensor: "th-1", metric: "temp", n: 5558400, avg: 24.02, ... }, { t: 2024, ..., diff: 1.98 }, ...]
+// 4) รายปี t = 1 ม.ค. ของปีนั้น อ่าน sensor_daily (เกิน TTL hourly 2 ปีได้)
+//   data: [{ t: "2023-01-01T00:00:00Z", sensor: "th-1", metric: "temp", n: 5558400, avg: 24.02, ... }, { t: "2024-01-01T00:00:00Z", ..., diff: 1.98 }, ...]
 //
 // bucket ที่ไม่มีข้อมูลไม่มีแถว (ไม่เติม 0) / input นอก whitelist หรือเกินเพดาน → throw Error
 export async function getStats(q: StatsQuery): Promise<StatsResponse> {
@@ -122,7 +125,7 @@ export async function getStats(q: StatsQuery): Promise<StatsResponse> {
               round(avgMerge(avg_v) * countMerge(samples), 2)   AS sum
        FROM ${g.table}
        WHERE (empty({sensors:Array(String)}) OR has({sensors:Array(String)}, sensor))
-         AND ${RANGE[g.time]}
+         AND ${RANGE[g.range]}
          AND (empty({metrics:Array(String)}) OR has({metrics:Array(String)}, metric))
        GROUP BY t, ${by}
      )
@@ -132,7 +135,7 @@ export async function getStats(q: StatsQuery): Promise<StatsResponse> {
   );
   return {
     meta: {
-      grain: q.grain, groupBy, from: q.from, to: q.to, tz: "Asia/Bangkok", source: g.table,
+      grain: q.grain, groupBy, from: q.from, to: q.to, tz: "UTC", source: g.table,
       sensors, metrics, rows: data.length, took_ms: Math.round(performance.now() - t0),
     },
     data,
@@ -162,10 +165,10 @@ export function toSeries(data: StatsRow[]): Series[] {
 
 // ตาราง/CSV/กราฟหลายเส้นแกนเดียว: 1 แถวต่อ t คอลัมน์ = "sensor.metric" (หรือ "metric" ถ้า fleet)
 // bucket ที่ series ไหนไม่มีข้อมูล คอลัมน์นั้นเป็น null (แถวยังอยู่ ไม่หาย)
-export type WideRow = { t: string | number } & Record<string, number | null>;
+export type WideRow = { t: string } & Record<string, number | null>;
 export function toWide(data: StatsRow[], field: "avg" | "min" | "max" | "sum" | "n" | "diff" = "avg"): WideRow[] {
   const keys = [...new Set(data.map(keyOf))];
-  const byT = new Map<string | number, WideRow>();
+  const byT = new Map<string, WideRow>();
   for (const r of data) {
     if (!byT.has(r.t)) byT.set(r.t, Object.fromEntries([["t", r.t], ...keys.map((k) => [k, null])]) as WideRow);
     byT.get(r.t)![keyOf(r)] = r[field];

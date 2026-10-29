@@ -40,14 +40,14 @@ const tStart = yearsAgo(YEARS);
 const agg = (bucket: string) =>
   `countMergeState(arrayReduce('countState', arrayWithConstant(${COARSE}, value))) AS samples,
    avgMergeState(arrayReduce('avgState', arrayWithConstant(${COARSE}, value))) AS avg_v,
-   min(value) AS min_v, max(value) AS max_v, argMaxState(value, ts) AS last_v
-   FROM (${longSql(devices, COARSE)}) GROUP BY ${bucket}, sensor, metric`;
+   min(value) AS min_v, max(value) AS max_v, argMaxState(value, l.ts) AS last_v
+   FROM (${longSql(devices, COARSE)}) AS l GROUP BY ${bucket}, sensor, metric`; // l.ts = เวลาจริง (ts ด้านนอกเป็น bucket ที่ปัดแล้ว)
 // step = วินาทีต่อจุด: n ที่ส่งเข้า numbers() = ช่วงเวลา ÷ step
 const TIERS = [
   { table: "sensor_daily", from: tStart, to: tHourly, chunk: 60 * DAY, step: COARSE,
-    sql: `INSERT INTO sensor_daily SELECT toDate(ts, 'Asia/Bangkok') AS day, sensor, metric, ${agg("day")}` },
+    sql: `INSERT INTO sensor_daily SELECT toStartOfDay(ts, 'UTC') AS ts, sensor, metric, ${agg("ts")}` },
   { table: "sensor_hourly", from: tHourly, to: tLong, chunk: 60 * DAY, step: COARSE,
-    sql: `INSERT INTO sensor_hourly SELECT toStartOfHour(ts) AS hour, sensor, metric, ${agg("hour")}` },
+    sql: `INSERT INTO sensor_hourly SELECT toStartOfHour(ts) AS ts, sensor, metric, ${agg("ts")}` },
   { table: "sensor_long", from: tLong, to: tRaw, chunk: DAY / 4, step: 1, sql: `INSERT INTO sensor_long ${LONG}` },
   { table: "sensor_raw", from: tRaw, to: now, chunk: DAY / 4, step: 1, sql: `INSERT INTO sensor_raw ${rawSql(devices)}` },
 ];
@@ -73,9 +73,9 @@ console.table(
   await rows(`
     SELECT 'sensor_raw' AS table, count() AS rows, toDate(min(ts)) AS from, toDate(max(ts)) AS to FROM sensor_raw
     UNION ALL SELECT 'sensor_long', count(), toDate(min(ts)), toDate(max(ts)) FROM sensor_long
-    UNION ALL SELECT 'sensor_1m', count(), toDate(min(minute)), toDate(max(minute)) FROM sensor_1m
-    UNION ALL SELECT 'sensor_hourly', count(), toDate(min(hour)), toDate(max(hour)) FROM sensor_hourly
-    UNION ALL SELECT 'sensor_daily', count(), min(day), max(day) FROM sensor_daily`),
+    UNION ALL SELECT 'sensor_1m', count(), toDate(min(ts)), toDate(max(ts)) FROM sensor_1m
+    UNION ALL SELECT 'sensor_hourly', count(), toDate(min(ts)), toDate(max(ts)) FROM sensor_hourly
+    UNION ALL SELECT 'sensor_daily', count(), toDate(min(ts)), toDate(max(ts)) FROM sensor_daily`),
 );
 console.table(
   await rows(`
@@ -90,10 +90,10 @@ console.table(await rows("SELECT sensor, groupArray(DISTINCT metric) AS metrics 
 // ยกเว้นวันแรก/วันสุดท้ายที่เริ่ม/จบกลางวัน
 const [c] = await rows<{ days: number; bad: number }>(`
   SELECT count() AS days, countIf(n != 86400) AS bad FROM (
-    SELECT day, countMerge(samples) AS n FROM sensor_daily
+    SELECT ts, countMerge(samples) AS n FROM sensor_daily
     WHERE sensor = 'th-1' AND metric = 'temp'
-    GROUP BY day
-    HAVING day > (SELECT min(day) FROM sensor_daily) AND day < (SELECT max(day) FROM sensor_daily))`);
+    GROUP BY ts
+    HAVING ts > (SELECT min(ts) FROM sensor_daily) AND ts < (SELECT max(ts) FROM sensor_daily))`);
 console.assert(c?.bad === 0, "มีวันที่จำนวนจุดไม่ครบ 86,400");
 console.log(`daily th-1 temp: ${c?.days} วัน, วันที่ไม่ครบ 86,400 จุด: ${c?.bad}`);
 await ch.close();

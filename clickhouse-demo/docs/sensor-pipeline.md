@@ -53,11 +53,13 @@ hourly: { years: 2 }   // กราฟรายชั่วโมง
 |---|---|---|---|---|
 | `sensor_raw` | MergeTree | รายวัน | `(sensor, ts)` | `data JSON` แยก key เป็น subcolumn ให้เอง |
 | `sensor_long` | MergeTree | รายวัน | `(sensor, metric, ts)` | 1 แถวต่อ 1 ค่า รับ metric ใหม่โดยไม่ต้อง ALTER |
-| `sensor_1m` | AggregatingMergeTree | รายวัน | `(sensor, metric, minute)` | สรุปรายนาทีจาก long เก็บสั้น (TTL 3 วัน) |
-| `sensor_hourly` | AggregatingMergeTree | รายเดือน | `(sensor, metric, hour)` | เก็บ state: `samples`, `avg_v` เป็น binary |
-| `sensor_daily` | AggregatingMergeTree | ไม่แบ่ง | `(sensor, metric, day)` | วันตัดตามเวลาไทยตั้งแต่ตอนเขียน |
+| `sensor_1m` | AggregatingMergeTree | รายวัน | `(sensor, metric, ts)` | สรุปรายนาทีจาก long เก็บสั้น (TTL 3 วัน) |
+| `sensor_hourly` | AggregatingMergeTree | รายเดือน | `(sensor, metric, ts)` | เก็บ state: `samples`, `avg_v` เป็น binary |
+| `sensor_daily` | AggregatingMergeTree | ไม่แบ่ง | `(sensor, metric, ts)` | วันตัดตาม UTC ตั้งแต่ตอนเขียน (ts = 00:00Z ของวัน) |
 
-คอลัมน์เวลา: raw/long = `ts`, 1m = `minute`, hourly = `hour`, daily = `day`
+คอลัมน์เวลาชื่อ `ts` (`DateTime` UTC) เหมือนกันทุกตาราง: 1m = ต้นนาที, hourly = ต้นชั่วโมง, daily = 00:00Z ของวัน
+ใน MV ที่ปัดเวลาเป็น `AS ts` ซ้อนชื่อกับ column ต้นทาง ต้องเขียน `argMaxState(value, sensor_long.ts)` ไม่งั้น `last_v` ใช้เวลาที่ปัดแล้วผิดแบบเงียบๆ
+`DateTime` ของ ClickHouse เก็บ epoch ไม่มี timezone ติดค่า ตอนแสดงเป็น `2026-10-22 07:07:44` (UTC) ส่วน API ส่งเป็น ISO `…Z`
 
 ตารางสรุปทุกตัว (1m, hourly, daily) มี `last_v` = `argMaxState(value, ts)` = ค่าล่าสุดของ bucket ใช้กับ aggregation `last` และ `diff`
 
@@ -78,7 +80,7 @@ View สำหรับ TablePlus: `sensor_1m_v` / `sensor_hourly_v` / `sensor_d
 
 - กับดัก JSON: แปลงด้วย `::Nullable(Float64)` / `::Float64` เปลี่ยนค่าที่ไม่มีเป็น 0 / `.:Float64` ข้ามค่า Int64 เงียบๆ
 - hourly และ daily ตรงกับคำนวณจาก raw
-- daily แยกวันตามเวลาไทยถูก (ทดสอบข้อมูลคร่อมเที่ยงคืน)
+- daily แยกวัน UTC ถูก (ทดสอบข้อมูลคร่อมเที่ยงคืน UTC)
 
 ---
 
@@ -135,12 +137,13 @@ env:
 getStats({
   sensors: ["th-1", "th-2"],   // ไม่เกิน MAX_SENSORS (100) / ว่าง = ทุก device (ใช้กับ total เท่านั้น)
   metrics: ["temp"],            // ว่าง = ทุก metric
-  grain: "day",                 // hour | day (อ่าน hourly) / month | year (อ่าน daily)
+  grain: "day",                 // hour | day (อ่าน hourly) / month | year (อ่าน daily) ตัดตาม UTC
   groupBy: "device",            // device = แยกตัว / total = รวมที่เลือกเป็นค่าเดียว
-  from: "2026-10-21 00:00:00",  // เวลาไทย
-  to: "2026-10-28 00:00:00",    // ไม่รวม
+  from: "2026-10-21T00:00:00Z", // UTC (รับ 'YYYY-MM-DD HH:MM:SS' ด้วย ตีเป็น UTC)
+  to: "2026-10-28T00:00:00Z",   // ไม่รวม
 })
-// → { meta: { grain, groupBy, source, rows, took_ms, ... }, data: [{ t, sensor?, devices?, metric, n, avg, min, max, sum, diff }] }
+// → { meta: { grain, groupBy, source, rows, took_ms, tz: "UTC", ... }, data: [{ t, sensor?, devices?, metric, n, avg, min, max, sum, diff }] }
+// t เป็น ISO UTC ทุก grain: "2026-10-21T00:00:00Z" (day = 00:00Z, month = วันที่ 1, year = 1 ม.ค.)
 ```
 
 - `toSeries(data)`: กราฟเส้น 1 series ต่อ (sensor, metric)
@@ -186,7 +189,7 @@ response (เขียนเต็มที่ `examples/13-response.json`, ถ�
 - แต่ละ metric เลือก aggregation ของตัวเอง (`mean`, `max`, `diff`, ...) `diff` เหมาะกับ counter เท่านั้น
 - `compare.mode`: `previous_period` (ช่วงยาวเท่ากันก่อนหน้า) / `previous_year` / `custom` (+ `custom_time_range`)
 - `delta` ต่อ metric = `{ absolute, percent }` ข้าม metric ที่ค่า compare เป็น 0 (หาร percent ไม่ได้)
-- อ่านจาก `sensor_hourly` ถ้าช่วงยังอยู่ใน TTL 2 ปี เกินนั้นอ่านจาก `sensor_daily` ซึ่งตัดวันตามเวลาไทย ขอบช่วงจึงปัดเป็นวันไทย
+- อ่านจาก `sensor_hourly` ถ้าช่วงยังอยู่ใน TTL 2 ปี เกินนั้นอ่านจาก `sensor_daily` ซึ่งตัดวัน UTC ขอบช่วงที่ไม่ตรง 00:00Z จึงปัดลงเป็นต้นวัน UTC
 - ยังไม่ทำ: `compare.interval`, `group_by` อื่นนอกจาก `["device_id"]`
 - response: `{ took_ms, meta, results: [{ group: { device_id }, result: { current, compare, delta } }] }`
 

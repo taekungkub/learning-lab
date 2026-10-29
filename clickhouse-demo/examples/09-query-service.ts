@@ -4,11 +4,11 @@
 import { ch, rows } from "../src/ch";
 import { getStats, MAX_SENSORS, toSeries, toWide, type StatsQuery, type StatsRow } from "../src/stats";
 
-// วันที่ตามเวลาไทย 'YYYY-MM-DD' (offset วันจากวันนี้)
-const bkkDate = (offsetDays = 0) => new Date(Date.now() + 7 * 3600e3 + offsetDays * 86400e3).toISOString().slice(0, 10);
-const ALL = { from: "2000-01-01 00:00:00", to: "2100-01-01 00:00:00" };
-const yesterday = { from: `${bkkDate(-1)} 00:00:00`, to: `${bkkDate(0)} 00:00:00` };
-const last7 = { from: `${bkkDate(-7)} 00:00:00`, to: `${bkkDate(0)} 00:00:00` };
+// วันที่ UTC 'YYYY-MM-DD' (offset วันจากวันนี้) / from-to เป็น ISO UTC เหมือน API อื่น
+const utcDate = (offsetDays = 0) => new Date(Date.now() + offsetDays * 86400e3).toISOString().slice(0, 10);
+const ALL = { from: "2000-01-01T00:00:00Z", to: "2100-01-01T00:00:00Z" };
+const yesterday = { from: `${utcDate(-1)}T00:00:00Z`, to: `${utcDate(0)}T00:00:00Z` };
+const last7 = { from: `${utcDate(-7)}T00:00:00Z`, to: `${utcDate(0)}T00:00:00Z` };
 
 async function show(label: string, q: StatsQuery, limit = 6) {
   const r = await getStats(q);
