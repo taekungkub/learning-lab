@@ -48,6 +48,16 @@ WHERE sensor = 'th-1'
 GROUP BY t, sensor, metric
 ORDER BY metric, t;
 
+-- 2.1 รายวัน 30 วันล่าสุด (เครื่องวัดอุณหภูมิ หลายตัว หลาย metric)
+SELECT toDate(hour, 'Asia/Bangkok') AS t, sensor, metric,
+       countMerge(samples) AS n, round(avgMerge(avg_v), 2) AS avg, min(min_v) AS min, max(max_v) AS max
+FROM sensor_hourly
+WHERE sensor IN ('th-1', 'th-2', 'th-3') AND metric IN ('temp', 'humidity')
+  AND hour >= toStartOfDay(now('Asia/Bangkok')) - INTERVAL 30 DAY
+  AND hour <  toStartOfDay(now('Asia/Bangkok'))
+GROUP BY t, sensor, metric
+ORDER BY sensor, metric, t;
+
 
 -- 3. รายเดือน 12 เดือนล่าสุด + เดือนนี้ (จาก daily)
 SELECT toStartOfMonth(day) AS t, sensor, metric,
