@@ -69,4 +69,6 @@ env ของ 13: `MAX_POINTS` (จุดต่อเส้นสูงสุด
 3. device ย้าย location: **ตัดสินใจแล้ว** raw เก็บแค่ device_id, location มาจากตาราง `devices` (ปัจจุบัน) ถาม location ข้อมูลก่อนย้ายไปนับที่ location ใหม่ ถามตาม device ถูกเสมอ (ต้องแยกจริงค่อยเพิ่มตารางประวัติการย้าย ไม่ต้องแก้ raw)
 4. ข้อมูลไม่สมบูรณ์ (device หาย, ส่งซ้ำ, ส่งย้อนหลัง, counter reset), benchmark 10k device, benchmark PG
 
-Query พร้อม copy ไปรันใน TablePlus (ชั่วโมง/วัน/เดือน/ปี, raw, หลาย meter, aggregation, ดูเวลา query, TTL, partition): `docs/queries.sql`
+Query พร้อม copy ไปรันใน TablePlus:
+- `docs/queries.sql` ข้อมูล: นาที/ชั่วโมง/วัน/เดือน/ปี, raw, หลาย meter, aggregation
+- `docs/monitoring.sql` ตรวจระบบ: เวลา query, TTL, disk, partition, part

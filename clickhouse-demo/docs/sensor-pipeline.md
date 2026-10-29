@@ -26,7 +26,7 @@ bun run examples/13-api-body.ts       # body แบบ API เก่า → ก�
 bun run examples/14-aggregate.ts      # aggregate ทั้งช่วง + compare (อ่านอย่างเดียว)
 ```
 
-Query สำหรับ TablePlus: `docs/queries.sql`
+Query สำหรับ TablePlus: `docs/queries.sql` (ข้อมูล) / `docs/monitoring.sql` (ตรวจ disk, partition, TTL, query_log)
 
 ---
 
@@ -206,7 +206,7 @@ response (เขียนเต็มที่ `examples/13-response.json`, ถ�
 - **raw เก็บแค่ device_id**: location มาจากตาราง `devices` ถามตาม location = location ปัจจุบัน ถามตาม device ถูกเสมอ
 - **daily ไม่มี TTL**: โตช้า (~350 MiB/ปี ที่ 10k device) ตัวที่กิน disk จริงคือ raw กับ long
 
-## ดูสถานะ (query ใน `docs/queries.sql`)
+## ดูสถานะ (query ใน `docs/monitoring.sql`)
 
 - disk ต่อตาราง / ต่อคอลัมน์ / ทั้งเครื่อง: `system.parts`, `system.columns`, `system.disks`
 - part ใน partition และเวลาที่ TTL จะลบ: `system.parts` (`delete_ttl_info_max`)
