@@ -7,6 +7,7 @@
 export const TTL = {
   raw: { days: 3 }, // payload JSON เดิม ไว้ debug (ซ้ำกับ long)
   long: { days: 7 }, // ค่าดิบรายวินาที ดูช่วงสั้น (เกินนี้ใช้ hourly)
+  m1: { days: 3 }, // สรุปราย 1 นาที (interval 1m-30m) แยกกิ่งจาก long ไม่ได้ป้อน hourly สั้นกว่า long ได้
   hourly: { years: 2 }, // กราฟรายชั่วโมง
 } as const;
 

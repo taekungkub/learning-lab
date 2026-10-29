@@ -1,6 +1,7 @@
 // bun run examples/11-backfill.ts   (ต้องรัน 08 ก่อน: ใช้ schema sensor_*)
-// DEVICES=100 bun run examples/11-backfill.ts  (เปลี่ยนจำนวน device ได้ ใช้เวลาเพิ่มตามจำนวน)
-// mock ข้อมูลย้อนหลัง 5 ปี รายวินาที device/metric จาก src/mock.ts (ชุดเดียวกับ 10-simulator)
+// DEVICES=100 bun run examples/11-backfill.ts  (default 10 device ใช้เวลาเพิ่มตามจำนวน)
+// mock ข้อมูลย้อนหลัง YEARS ปี (default 3) รายวินาที device/metric จาก src/mock.ts (ชุดเดียวกับ 10-simulator)
+// sensor_1m ไม่ต้อง backfill แยก: MV จาก long สร้างให้ตอนเขียนช่วง long + raw (เกิน TTL.m1 ถูกลบตอน merge)
 // แต่ละตารางมีข้อมูลเต็มช่วง TTL ของตัวเอง (src/config.ts) เหมือนระบบที่รันมาแล้ว 5 ปี:
 //   sensor_raw     ช่วง TTL.raw ล่าสุด          payload JSON  MV ต่อเป็น long → hourly → daily
 //   sensor_long    TTL.raw .. TTL.long          ค่าดิบ         MV ต่อเป็น hourly → daily
@@ -39,7 +40,7 @@ const tStart = yearsAgo(YEARS);
 const agg = (bucket: string) =>
   `countMergeState(arrayReduce('countState', arrayWithConstant(${COARSE}, value))) AS samples,
    avgMergeState(arrayReduce('avgState', arrayWithConstant(${COARSE}, value))) AS avg_v,
-   min(value) AS min_v, max(value) AS max_v
+   min(value) AS min_v, max(value) AS max_v, argMaxState(value, ts) AS last_v
    FROM (${longSql(devices, COARSE)}) GROUP BY ${bucket}, sensor, metric`;
 // step = วินาทีต่อจุด: n ที่ส่งเข้า numbers() = ช่วงเวลา ÷ step
 const TIERS = [
@@ -51,7 +52,8 @@ const TIERS = [
   { table: "sensor_raw", from: tRaw, to: now, chunk: DAY / 4, step: 1, sql: `INSERT INTO sensor_raw ${rawSql(devices)}` },
 ];
 
-for (const t of ["sensor_raw", "sensor_long", "sensor_hourly", "sensor_daily"]) await ch.command({ query: `TRUNCATE TABLE ${t}` });
+for (const t of ["sensor_raw", "sensor_long", "sensor_1m", "sensor_hourly", "sensor_daily"])
+  await ch.command({ query: `TRUNCATE TABLE ${t}` });
 
 const fmt = (s: number) => new Date(s * 1000).toISOString().slice(0, 10);
 for (const tier of TIERS) {
@@ -71,6 +73,7 @@ console.table(
   await rows(`
     SELECT 'sensor_raw' AS table, count() AS rows, toDate(min(ts)) AS from, toDate(max(ts)) AS to FROM sensor_raw
     UNION ALL SELECT 'sensor_long', count(), toDate(min(ts)), toDate(max(ts)) FROM sensor_long
+    UNION ALL SELECT 'sensor_1m', count(), toDate(min(minute)), toDate(max(minute)) FROM sensor_1m
     UNION ALL SELECT 'sensor_hourly', count(), toDate(min(hour)), toDate(max(hour)) FROM sensor_hourly
     UNION ALL SELECT 'sensor_daily', count(), min(day), max(day) FROM sensor_daily`),
 );

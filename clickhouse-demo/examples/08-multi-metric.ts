@@ -3,7 +3,9 @@
 
 // การทำงาน
 // sensor_raw (JSON) ──MV──► sensor_long (ts, sensor, metric, value) ──MV──► sensor_hourly ──MV──► sensor_daily
-//                                                                           ▲ sensor_hourly_v       ▲ sensor_daily_v
+//                                                │                          ▲ sensor_hourly_v       ▲ sensor_daily_v
+//                                                └──MV──► sensor_1m (interval 1m-30m, TTL 3 วัน)
+// ทุกตารางสรุปมี last_v (argMaxState(value, ts)) = ค่าล่าสุดของ bucket ใช้กับ aggregation last / diff
 
 import { ch, rows } from "../src/ch";
 import { TTL, ttlSql } from "../src/config";
@@ -11,6 +13,7 @@ import { TTL, ttlSql } from "../src/config";
 for (const t of [
   "sensor_daily_v", "sensor_daily_mv", "sensor_daily",
   "sensor_hourly_v", "sensor_hourly_mv", "sensor_hourly",
+  "sensor_1m_v", "sensor_1m_mv", "sensor_1m",
   "sensor_long_mv", "sensor_long", "sensor_raw",
 ])
   await ch.command({ query: `DROP TABLE IF EXISTS ${t}` });
@@ -54,6 +57,34 @@ await ch.command({
           WHERE kv.2 IS NOT NULL`,
 });
 
+// 2b) 1 นาทีจาก long: interval 1m/5m/15m/30m รวมจากตารางนี้ (หารลงตัว) เก็บสั้นเพราะใหญ่
+await ch.command({
+  query: `CREATE TABLE sensor_1m (
+            minute DateTime, sensor LowCardinality(String), metric LowCardinality(String),
+            samples AggregateFunction(count),
+            avg_v   AggregateFunction(avg, Float64),
+            min_v   SimpleAggregateFunction(min, Float64),
+            max_v   SimpleAggregateFunction(max, Float64),
+            last_v  AggregateFunction(argMax, Float64, DateTime)
+          ) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMMDD(minute) ORDER BY (sensor, metric, minute)
+          TTL minute + ${ttlSql(TTL.m1)}
+          SETTINGS ttl_only_drop_parts = 1`,
+});
+await ch.command({
+  query: `CREATE MATERIALIZED VIEW sensor_1m_mv TO sensor_1m AS
+          SELECT toStartOfMinute(ts) AS minute, sensor, metric,
+                 countState() AS samples, avgState(value) AS avg_v, min(value) AS min_v, max(value) AS max_v,
+                 argMaxState(value, ts) AS last_v
+          FROM sensor_long GROUP BY minute, sensor, metric`,
+});
+// view ไว้เปิดใน TablePlus (state เป็น binary)
+await ch.command({
+  query: `CREATE VIEW sensor_1m_v AS
+          SELECT minute, sensor, metric, countMerge(samples) AS samples,
+                 round(avgMerge(avg_v), 2) AS avg_v, min(min_v) AS min_v, max(max_v) AS max_v
+          FROM sensor_1m GROUP BY minute, sensor, metric`,
+});
+
 // 3) hourly rollup จาก long (cascade: MV นี้ทำงานเมื่อ sensor_long_mv เขียนลง sensor_long)
 await ch.command({
   query: `CREATE TABLE sensor_hourly (
@@ -61,7 +92,8 @@ await ch.command({
             samples AggregateFunction(count),
             avg_v   AggregateFunction(avg, Float64),
             min_v   SimpleAggregateFunction(min, Float64),
-            max_v   SimpleAggregateFunction(max, Float64)
+            max_v   SimpleAggregateFunction(max, Float64),
+            last_v  AggregateFunction(argMax, Float64, DateTime)
           ) ENGINE = AggregatingMergeTree PARTITION BY toYYYYMM(hour) ORDER BY (sensor, metric, hour)
           TTL hour + ${ttlSql(TTL.hourly)}
           SETTINGS ttl_only_drop_parts = 1`,
@@ -69,7 +101,8 @@ await ch.command({
 await ch.command({
   query: `CREATE MATERIALIZED VIEW sensor_hourly_mv TO sensor_hourly AS
           SELECT toStartOfHour(ts) AS hour, sensor, metric,
-                 countState() AS samples, avgState(value) AS avg_v, min(value) AS min_v, max(value) AS max_v
+                 countState() AS samples, avgState(value) AS avg_v, min(value) AS min_v, max(value) AS max_v,
+                 argMaxState(value, ts) AS last_v
           FROM sensor_long GROUP BY hour, sensor, metric`,
 });
 // view ไว้เปิดใน TablePlus (state เป็น binary)
@@ -89,14 +122,15 @@ await ch.command({
             samples AggregateFunction(count),
             avg_v   AggregateFunction(avg, Float64),
             min_v   SimpleAggregateFunction(min, Float64),
-            max_v   SimpleAggregateFunction(max, Float64)
+            max_v   SimpleAggregateFunction(max, Float64),
+            last_v  AggregateFunction(argMax, Float64, DateTime)
           ) ENGINE = AggregatingMergeTree ORDER BY (sensor, metric, day)`,
 });
 await ch.command({
   query: `CREATE MATERIALIZED VIEW sensor_daily_mv TO sensor_daily AS
           SELECT toDate(hour, 'Asia/Bangkok') AS day, sensor, metric,
                  countMergeState(samples) AS samples, avgMergeState(avg_v) AS avg_v,
-                 min(min_v) AS min_v, max(max_v) AS max_v
+                 min(min_v) AS min_v, max(max_v) AS max_v, argMaxMergeState(last_v) AS last_v
           FROM sensor_hourly GROUP BY day, sensor, metric`,
 });
 await ch.command({
@@ -209,7 +243,7 @@ console.table(
     SELECT table, groupUniqArray(partition) AS partitions, sum(rows) AS rows,
            min(delete_ttl_info_max) AS first_drop_at
     FROM system.parts
-    WHERE database = 'demo' AND active AND table IN ('sensor_raw', 'sensor_long', 'sensor_hourly', 'sensor_daily')
+    WHERE database = 'demo' AND active AND table IN ('sensor_raw', 'sensor_long', 'sensor_1m', 'sensor_hourly', 'sensor_daily')
     GROUP BY table ORDER BY table`),
 );
 await ch.close();

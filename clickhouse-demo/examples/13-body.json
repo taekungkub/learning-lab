@@ -1,0 +1,13 @@
+{
+  "time_range": { "from": "2025-07-22T00:00:00Z", "to": "2026-10-20T00:00:00Z" },
+  "filters": { "device_ids": ["pm-1", "pm-2", "pm-3", "pm-4", "th-1"] },
+  "series": [
+    {
+      "name": "n",
+      "metric_keys": ["power_kw", "voltage_l1", "current_l1", "temp", "humidity", "energy_kwh", "power_factor", "frequency"],
+      "aggregation": "sum",
+      "interval": "24h",
+      "group_by": ["device_id", "metric_key"]
+    }
+  ]
+}

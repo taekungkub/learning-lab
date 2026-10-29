@@ -1,0 +1,16 @@
+{
+  "scope": { "device_ids": ["pm-1", "pm-2", "pm-3", "pm-4", "th-1"] },
+  "time_range": { "from": "2025-07-22T00:00:00Z", "to": "2026-10-20T00:00:00Z" },
+  "group_by": ["device_id"],
+  "metrics": [
+    { "metric_key": "power_kw", "aggregation": "mean" },
+    { "metric_key": "voltage_l1", "aggregation": "mean" },
+    { "metric_key": "current_l1", "aggregation": "max" },
+    { "metric_key": "temp", "aggregation": "mean" },
+    { "metric_key": "humidity", "aggregation": "mean" },
+    { "metric_key": "energy_kwh", "aggregation": "diff" },
+    { "metric_key": "power_factor", "aggregation": "min" },
+    { "metric_key": "frequency", "aggregation": "mean" }
+  ],
+  "compare": { "mode": "previous_period" }
+}

@@ -30,19 +30,22 @@ bun run examples/08-multi-metric.ts          # sensor key ต่างกัน:
 bun run examples/09-query-service.ts         # (หลัง 11) getStats(): hour/day จาก hourly, month/year จาก daily (อ่านอย่างเดียว)
 bun run examples/10-simulator.ts             # (หลัง 08) device ส่งทุก 1 วิ เข้า sensor_raw (Ctrl+C หยุด)
 bun run examples/11-backfill.ts              # (หลัง 08) mock ย้อนหลังรายวินาที เต็มช่วง TTL ของแต่ละตาราง
+bun run examples/13-api-body.ts              # (หลัง 11) body แบบ API เก่า (13-body.json) → กราฟ 1 เส้นต่อ (device, metric) แก้ body ที่ JSON ได้เลย
+bun run examples/14-aggregate.ts             # (หลัง 11) aggregate ทั้งช่วง 1 ค่าต่อ device + เทียบช่วงก่อนหน้า (14-body.json)
 ```
 
 ทุก example DROP/CREATE ตารางเอง รันซ้ำได้ ยกเว้น 09 ที่อ่านอย่างเดียว
 
 **ระวัง: 08 DROP ตาราง `sensor_*` ทั้งหมด** (ข้อมูลที่ 10/11 ใส่ไว้หาย) และ 11 TRUNCATE ก่อนใส่ใหม่
 
-## ชุด sensor (08-11)
+## ชุด sensor (08-11, 13-14)
 
-ลำดับรัน: `08` (schema) → `11` (mock ย้อนหลัง) → `10` (ข้อมูลใหม่ต่อเนื่อง ถ้าต้องการ) → `09` / `docs/queries.sql`
+ลำดับรัน: `08` (schema) → `11` (mock ย้อนหลัง) → `10` (ข้อมูลใหม่ต่อเนื่อง ถ้าต้องการ) → `09` / `13` / `14` / `docs/queries.sql`
 
 | ไฟล์ | ตั้งค่า |
 |---|---|
-| `src/config.ts` | TTL ของ raw / long / hourly (08 สร้างตาราง, 11 ใช้กำหนดช่วงที่ mock) |
+| `src/config.ts` | TTL ของ raw / long / 1m / hourly (08 สร้างตาราง, 11 ใช้กำหนดช่วงที่ mock) |
+| `src/api-utils.ts` | type `Agg` + แปลงเวลา ISO ↔ UTC ที่ 13, 14 ใช้ร่วมกัน |
 | `src/mock.ts` | device + metric จำลอง (th-*: temp, humidity, ... / pm-*: 3 เฟส, kW, kWh counter) |
 | `src/stats.ts` | `getStats()` สำหรับ API/service: หลาย sensor/metric, grain, groupBy device/total, response `{ meta, data }` + `toSeries` / `toWide` |
 
@@ -52,6 +55,9 @@ env ของ 10/11:
 - `COARSE=1` ให้ 11 สร้าง hourly/daily จากค่ารายวินาทีจริง (ค่าเริ่มต้น 60: ค่าทุก 60 วิ นับเป็น 60 จุด เร็วกว่า ~30 เท่า)
 
 PowerShell: `$env:DEVICES=100; bun run examples/10-simulator.ts`
+
+env ของ 13: `MAX_POINTS` (จุดต่อเส้นสูงสุด default 20000) / `RUNS`, `CONCURRENCY` (วัด p50/p95) / `SUITE=1` (ชุดทดสอบทุก interval) / `OUT` (ที่เก็บ response เต็ม)
+ใช้ชื่อ device/metric ของ mock (`pm-1`, `power_kw`, ...) ไม่ใช่ UUID ของระบบจริง รายละเอียดใน `docs/sensor-pipeline.md`
 
 ## ขั้นต่อไป (ยังไม่ทำ ทำทีละขั้น)
 
