@@ -9,8 +9,8 @@ import { fileURLToPath } from "node:url";
 import { ch, rows } from "../src/ch";
 import { type Agg, HOURLY_MAX_AGE, toSec, utc } from "../src/api-utils";
 
-type TimeRange = { from: string; to: string };
-type Body = {
+export type TimeRange = { from: string; to: string };
+export type Body = {
   scope: { device_ids: string[] };
   time_range: TimeRange;
   group_by: "device_id"[];
@@ -22,6 +22,10 @@ type AggregateResult = {
   group: Record<string, string>;
   result: { current: Record<string, number>; compare?: Record<string, number>; delta?: Record<string, AggregateDelta> };
 };
+
+// ดึงค่าสรุปของ 1 ช่วง: default ClickHouse / 15-compare-mongo ใส่ของ Mongo แทน
+export type Fetched = { table: string; range: TimeRange; byDevice: Map<string, Record<string, number>> };
+export type FetchRange = (body: Body, range: TimeRange) => Promise<Fetched>;
 
 // c = เงื่อนไขแถวในช่วง / p = bucket ก่อนช่วง (ใช้กับ diff)
 // last = argMax ตามเวลา / diff = last ในช่วง − last ก่อนช่วง (ใช้กับ counter เช่น kWh)
@@ -36,7 +40,20 @@ const AGG: Record<Agg, (c: string, p: string) => string> = {
   diff: (c, p) => `argMaxMergeIf(last_v, ${c}) - argMaxMergeIf(last_v, ${p})`,
 };
 
+// ค่าดิบ (sensor_long) แทน state: ไว้เทียบกับ Mongo ที่ไม่มี rollup (15-compare-mongo)
+const AGG_RAW: Record<Agg, (c: string, p: string) => string> = {
+  mean: (c) => `avgIf(value, ${c})`,
+  avg: (c) => `avgIf(value, ${c})`,
+  sum: (c) => `sumIf(value, ${c})`,
+  count: (c) => `countIf(${c})`,
+  min: (c) => `minIf(value, ${c})`,
+  max: (c) => `maxIf(value, ${c})`,
+  last: (c) => `argMaxIf(value, ts, ${c})`,
+  diff: (c, p) => `argMaxIf(value, ts, ${c}) - argMaxIf(value, ts, ${p})`,
+};
+
 const HOURLY = { table: "sensor_hourly", time: "ts", from: "toDateTime({from:String}, 'UTC')", to: "toDateTime({to:String}, 'UTC')", step: "INTERVAL 1 HOUR" };
+const RAW = { ...HOURLY, table: "sensor_long" };
 const DAILY = { table: "sensor_daily", time: "ts", from: "toStartOfDay(toDateTime({from:String}, 'UTC'), 'UTC')", to: "toStartOfDay(toDateTime({to:String}, 'UTC'), 'UTC')", step: "INTERVAL 1 DAY" };
 
 const iso = (s: number) => new Date(s * 1000).toISOString().replace(".000", "");
@@ -60,9 +77,10 @@ function compareRange(body: Body): TimeRange | undefined {
 }
 
 // 1 query ต่อช่วง: 1 คอลัมน์ต่อ metric (-If) → Map device → { metric: ค่า } / ไม่มีข้อมูล (หรือ diff ไม่มีก่อนช่วง) = ไม่ใส่ key
-async function aggregate(body: Body, range: TimeRange) {
+export async function aggregate(body: Body, range: TimeRange, raw = false): Promise<Fetched> {
   checkRange(range);
-  const t = toSec(range.from) < Date.now() / 1000 - HOURLY_MAX_AGE ? DAILY : HOURLY;
+  const t = raw ? RAW : toSec(range.from) < Date.now() / 1000 - HOURLY_MAX_AGE ? DAILY : HOURLY;
+  const agg = raw ? AGG_RAW : AGG;
   const params: Record<string, unknown> = {
     devices: body.scope.device_ids, metrics: body.metrics.map((m) => m.metric_key), from: utc(toSec(range.from)), to: utc(toSec(range.to)),
   };
@@ -70,8 +88,9 @@ async function aggregate(body: Body, range: TimeRange) {
     params[`m${i}`] = m.metric_key;
     const c = `metric = {m${i}:String} AND ${t.time} >= ${t.from} AND ${t.time} < ${t.to}`;
     const p = `metric = {m${i}:String} AND ${t.time} >= ${t.from} - ${t.step} AND ${t.time} < ${t.from}`;
-    const need = m.aggregation === "diff" ? `countMergeIf(samples, ${c}) = 0 OR countMergeIf(samples, ${p}) = 0` : `countMergeIf(samples, ${c}) = 0`;
-    return `if(${need}, NULL, toFloat64(round(${AGG[m.aggregation](c, p)}, 3))) AS c${i}`;
+    const n = (w: string) => (raw ? `countIf(${w})` : `countMergeIf(samples, ${w})`);
+    const need = m.aggregation === "diff" ? `${n(c)} = 0 OR ${n(p)} = 0` : `${n(c)} = 0`;
+    return `if(${need}, NULL, toFloat64(round(${agg[m.aggregation](c, p)}, 3))) AS c${i}`;
   });
   const sql = `SELECT sensor, ${cols.join(", ")} FROM ${t.table}
     WHERE has({devices:Array(String)}, sensor) AND has({metrics:Array(String)}, metric)
@@ -85,7 +104,7 @@ async function aggregate(body: Body, range: TimeRange) {
   return { table: t.table, range, byDevice };
 }
 
-async function run(body: Body) {
+export async function run(body: Body, fetchRange: FetchRange = aggregate) {
   const ids = body.scope?.device_ids;
   if (!Array.isArray(ids) || !Array.isArray(body.metrics) || !body.time_range) throw new Error("body ต้องมี scope.device_ids, time_range, metrics");
   if (ids.length === 0 || ids.length > 100) throw new Error("scope.device_ids ต้องมี 1-100 ตัว");
@@ -96,7 +115,7 @@ async function run(body: Body) {
   const cmpRange = compareRange(body);
 
   const t0 = performance.now();
-  const [cur, cmp] = await Promise.all([aggregate(body, body.time_range), cmpRange ? aggregate(body, cmpRange) : undefined]);
+  const [cur, cmp] = await Promise.all([fetchRange(body, body.time_range), cmpRange ? fetchRange(body, cmpRange) : undefined]);
 
   const results: AggregateResult[] = ids.filter((d) => cur.byDevice.has(d)).map((d) => {
     const current = cur.byDevice.get(d)!;
@@ -113,13 +132,15 @@ async function run(body: Body) {
   return { took_ms: Math.round(performance.now() - t0), meta, results };
 }
 
-const file = process.argv[2];
-const body: Body = await Bun.file(file ?? new URL("./14-body.json", import.meta.url)).json();
-const r = await run(body);
-console.log(JSON.stringify({ ...r, results: [...r.results.slice(0, 2), `... ${r.results.length} device`] }, null, 2));
-// self-check (body เริ่มต้น): pm-1 เพิ่ม 10.5 kWh/ชม. × 455 วัน × 24 = 114,660
-if (!file) console.assert(r.results.find((x) => x.group.device_id === "pm-1")?.result.current.energy_kwh === 114660, "energy_kwh ของ pm-1 ไม่ตรง 114660");
-const out = process.env.OUT ?? fileURLToPath(new URL("./14-response.json", import.meta.url));
-await Bun.write(out, JSON.stringify(r, null, 2));
-console.log(`response เต็ม → ${out}`);
-await ch.close();
+if (import.meta.main) {
+  const file = process.argv[2];
+  const body: Body = await Bun.file(file ?? new URL("./14-body.json", import.meta.url)).json();
+  const r = await run(body);
+  console.log(JSON.stringify({ ...r, results: [...r.results.slice(0, 2), `... ${r.results.length} device`] }, null, 2));
+  // self-check (body เริ่มต้น): pm-1 เพิ่ม 10.5 kWh/ชม. × 455 วัน × 24 = 114,660
+  if (!file) console.assert(r.results.find((x) => x.group.device_id === "pm-1")?.result.current.energy_kwh === 114660, "energy_kwh ของ pm-1 ไม่ตรง 114660");
+  const out = process.env.OUT ?? fileURLToPath(new URL("./14-response.json", import.meta.url));
+  await Bun.write(out, JSON.stringify(r, null, 2));
+  console.log(`response เต็ม → ${out}`);
+  await ch.close();
+}

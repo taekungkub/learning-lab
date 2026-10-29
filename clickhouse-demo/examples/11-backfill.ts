@@ -1,6 +1,6 @@
 // bun run examples/11-backfill.ts   (ต้องรัน 08 ก่อน: ใช้ schema sensor_*)
 // DEVICES=100 bun run examples/11-backfill.ts  (default 10 device ใช้เวลาเพิ่มตามจำนวน)
-// mock ข้อมูลย้อนหลัง YEARS ปี (default 3) รายวินาที device/metric จาก src/mock.ts (ชุดเดียวกับ 10-simulator)
+// mock ข้อมูลย้อนหลัง YEARS ปี (default 2) รายวินาที device/metric จาก src/mock.ts (ชุดเดียวกับ 10-simulator)
 // sensor_1m ไม่ต้อง backfill แยก: MV จาก long สร้างให้ตอนเขียนช่วง long + raw (เกิน TTL.m1 ถูกลบตอน merge)
 // แต่ละตารางมีข้อมูลเต็มช่วง TTL ของตัวเอง (src/config.ts) เหมือนระบบที่รันมาแล้ว 5 ปี:
 //   sensor_raw     ช่วง TTL.raw ล่าสุด          payload JSON  MV ต่อเป็น long → hourly → daily
@@ -17,8 +17,9 @@ import { ch, rows } from "../src/ch";
 import { TTL } from "../src/config";
 import { longSql, makeDevices, rawSql } from "../src/mock";
 
-// เกิน TTL.hourly (2 ปี) มีแค่ใน sensor_daily: 3 ปีพอให้เห็นรายปีเกินช่วง hourly
-const YEARS = Number(process.env.YEARS ?? 3);
+// default 2 = เท่า TTL.hourly จึงไม่มีช่วงที่มีแค่ใน sensor_daily (daily ได้จาก MV ของ hourly)
+// ตั้ง YEARS=3 ขึ้นไปถ้าอยากให้ daily ยาวกว่า hourly (เห็นรายปีเกินช่วง hourly)
+const YEARS = Number(process.env.YEARS ?? 2);
 const COARSE = Number(process.env.COARSE ?? 60);
 const devices = makeDevices(Number(process.env.DEVICES ?? 10));
 const LONG = longSql(devices);

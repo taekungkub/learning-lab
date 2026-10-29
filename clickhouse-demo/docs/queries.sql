@@ -1,5 +1,5 @@
 -- Query ข้อมูลสำหรับ copy ไปรันใน TablePlus (database: demo) / ตรวจ disk, partition, TTL, query_log อยู่ที่ monitoring.sql
--- ต้องรัน examples/08 แล้ว 11-backfill ก่อน (mock 3 ปี รายวินาที 10 device, metric ที่ src/mock.ts)
+-- ต้องรัน examples/08 แล้ว 11-backfill ก่อน (mock 2 ปี รายวินาที 10 device, metric ที่ src/mock.ts)
 -- ช่วงเวลาอิง now() ไม่ต้องแก้วันที่
 -- device: th-1..5, pm-1..5
 -- metric th: temp, humidity, dew_point, battery_v, rssi

@@ -14,5 +14,16 @@ services:
     volumes:
       - ch-data:/var/lib/clickhouse
 
+  mongo: # ไว้เทียบความเร็วกับ ClickHouse (examples/15) เก็บ time series collection
+    image: mongo:8.0
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: default
+      MONGO_INITDB_ROOT_PASSWORD: demo
+    ports:
+      - "27018:27017" # 27018 เพราะ 27017 มี mongo ตัวอื่นใช้อยู่
+    volumes:
+      - mongo-data:/data/db
+
 volumes:
   ch-data:
+  mongo-data:

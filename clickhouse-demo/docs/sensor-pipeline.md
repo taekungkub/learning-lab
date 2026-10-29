@@ -98,19 +98,19 @@ View สำหรับ TablePlus: `sensor_1m_v` / `sensor_hourly_v` / `sensor_d
 
 ## Example 11: backfill ตาม TTL
 
-mock ย้อนหลัง `YEARS` ปี (default 3) แต่ละช่วงเขียนลงตารางที่เก็บช่วงนั้น ไม่สร้างข้อมูลที่ TTL จะลบอยู่ดี
+mock ย้อนหลัง `YEARS` ปี (default 2) แต่ละช่วงเขียนลงตารางที่เก็บช่วงนั้น ไม่สร้างข้อมูลที่ TTL จะลบอยู่ดี
 
 | ช่วง | เขียนลง | วิธี |
 |---|---|---|
 | 3 วันล่าสุด | `sensor_raw` | JSON รายวินาที (MV ทำต่อทุกชั้น) |
 | 3 วัน - 2 ปี | `sensor_hourly` | aggregate ฝั่ง server |
-| 2-3 ปี | `sensor_daily` | aggregate ตรง |
+| เกิน 2 ปี (เมื่อ `YEARS` > 2) | `sensor_daily` | aggregate ตรง (default ไม่มีช่วงนี้) |
 
 - `COARSE=60` (default): ช่วง hourly/daily สร้างค่าทุก 60 วิ นับแต่ละค่าเป็น 60 จุด
   `samples` ยังถูก, avg แทบเท่าเดิม, min/max แคบลงนิดหน่อย / 17 นาที → ~1 นาที / `COARSE=1` = รายวินาทีจริง
 - insert ทีละก้อน: client timeout 30 วิ
 - `sensor_1m` ไม่ต้อง backfill แยก: MV จาก long เขียนให้ตอนใส่ช่วง long + raw (ส่วนที่เกิน 3 วันถูกลบตอน merge ไม่ทันที)
-- ตรวจ: ทุกวันเต็มวันครบ 86,400 จุด (1,095 วัน)
+- ตรวจ: ทุกวันเต็มวันครบ 86,400 จุด (730 วันที่ default `YEARS=2`)
 
 ผลที่ได้ (10 device):
 
