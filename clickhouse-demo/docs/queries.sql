@@ -199,7 +199,7 @@ GROUP BY sensor, metric
 ORDER BY sensor, metric;
 
 
--- 9. payload JSON เดิมที่ device ส่งมา (sensor_raw เก็บ 7 วัน)
+-- 9. payload JSON เดิมที่ device ส่งมา (sensor_raw เก็บ 3 วัน)
 SELECT ts AS t, sensor, toJSONString(data) AS payload
 FROM sensor_raw
 WHERE sensor = 'th-1'

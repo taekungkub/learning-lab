@@ -26,13 +26,14 @@ while (running) {
 
   // ทุก 10 วิ: สถานะ parts (ดูว่า merge ตามทัน) + จำนวนแถว
   if (++tick % 10 === 0) {
-    const [s] = await rows<{ raw: number; long: number; hourly_parts: number; long_parts: number }>(`
+    const [s] = await rows<{ raw: number; long: number; long_parts: number; m1_parts: number; hourly_parts: number }>(`
       SELECT (SELECT count() FROM sensor_raw)  AS raw,
              (SELECT count() FROM sensor_long) AS long,
              (SELECT count() FROM system.parts WHERE database = 'demo' AND table = 'sensor_long'   AND active) AS long_parts,
+             (SELECT count() FROM system.parts WHERE database = 'demo' AND table = 'sensor_1m'     AND active) AS m1_parts,
              (SELECT count() FROM system.parts WHERE database = 'demo' AND table = 'sensor_hourly' AND active) AS hourly_parts`);
     console.log(
-      `${new Date().toLocaleTimeString("th-TH")} | insert ${insertMs}ms | raw ${s?.raw} แถว, long ${s?.long} แถว | parts: long ${s?.long_parts}, hourly ${s?.hourly_parts}`,
+      `${new Date().toLocaleTimeString("th-TH")} | insert ${insertMs}ms | raw ${s?.raw} แถว, long ${s?.long} แถว | parts: long ${s?.long_parts}, 1m ${s?.m1_parts}, hourly ${s?.hourly_parts}`,
     );
   }
 

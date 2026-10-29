@@ -7,7 +7,7 @@
 ```
 device ──INSERT──► sensor_raw ──MV──► sensor_long ──MV──► sensor_hourly ──MV──► sensor_daily
                    (JSON)              (1 แถว/ค่า)    │     (สรุปรายชั่วโมง)       (สรุปรายวัน ไทย)
-                   TTL 3 วัน            TTL 7 วัน     │      TTL 2 ปี               ไม่มี TTL
+                   TTL 3 วัน            TTL 3 วัน     │      TTL 2 ปี               ไม่มี TTL
                                                       └──MV──► sensor_1m (สรุปรายนาที TTL 3 วัน)
 ```
 
@@ -34,7 +34,7 @@ Query สำหรับ TablePlus: `docs/queries.sql`
 
 ```ts
 raw:    { days: 3 }    // payload JSON เดิม ไว้ debug
-long:   { days: 7 }    // ค่ารายวินาที
+long:   { days: 3 }    // ค่ารายวินาที
 m1:     { days: 3 }    // สรุปรายนาที (interval 1m, 15m)
 hourly: { years: 2 }   // กราฟรายชั่วโมง
 // daily ไม่มี TTL
@@ -42,7 +42,7 @@ hourly: { years: 2 }   // กราฟรายชั่วโมง
 
 - 08 ใช้ตั้ง TTL ตอนสร้างตาราง, 11 ใช้กำหนดว่าจะ mock ช่วงไหนลงตารางไหน
 - TTL ต้องยาวขึ้นตามชั้น: สรุปถูกเขียนไว้ตั้งแต่ตอน insert ลบชั้นล่างแล้วชั้นบนยังอยู่
-- long ลดจาก 30 เหลือ 7 วัน: ที่ 10k device ส่งทุกวินาที long ~12 GiB/วัน (30 วัน ~350 GiB, 7 วัน ~85 GiB)
+- long ลดจาก 30 เหลือ 7 แล้วเหลือ 3 วัน: ที่ 10k device ส่งทุกวินาที long ~12 GiB/วัน (30 วัน ~350 GiB, 7 วัน ~85 GiB, 3 วัน ~36 GiB) ตอนนี้ช่วงเท่า raw
 - แก้ค่าแล้ว: demo รัน 08 ใหม่ / ระบบจริง `ALTER TABLE ... MODIFY TTL` (ข้อมูลไม่หาย)
 
 ---
@@ -103,8 +103,7 @@ mock ย้อนหลัง `YEARS` ปี (default 3) แต่ละช่�
 | ช่วง | เขียนลง | วิธี |
 |---|---|---|
 | 3 วันล่าสุด | `sensor_raw` | JSON รายวินาที (MV ทำต่อทุกชั้น) |
-| 3-7 วัน | `sensor_long` | ค่ารายวินาที (MV ต่อเป็น 1m, hourly, daily) |
-| 7 วัน - 2 ปี | `sensor_hourly` | aggregate ฝั่ง server |
+| 3 วัน - 2 ปี | `sensor_hourly` | aggregate ฝั่ง server |
 | 2-3 ปี | `sensor_daily` | aggregate ตรง |
 
 - `COARSE=60` (default): ช่วง hourly/daily สร้างค่าทุก 60 วิ นับแต่ละค่าเป็น 60 จุด

@@ -4,7 +4,7 @@
 // sensor_1m ไม่ต้อง backfill แยก: MV จาก long สร้างให้ตอนเขียนช่วง long + raw (เกิน TTL.m1 ถูกลบตอน merge)
 // แต่ละตารางมีข้อมูลเต็มช่วง TTL ของตัวเอง (src/config.ts) เหมือนระบบที่รันมาแล้ว 5 ปี:
 //   sensor_raw     ช่วง TTL.raw ล่าสุด          payload JSON  MV ต่อเป็น long → hourly → daily
-//   sensor_long    TTL.raw .. TTL.long          ค่าดิบ         MV ต่อเป็น hourly → daily
+//   sensor_long    TTL.raw .. TTL.long          ค่าดิบ         MV ต่อเป็น hourly → daily (TTL.long = TTL.raw → ช่วงนี้ว่าง)
 //   sensor_hourly  TTL.long .. TTL.hourly       aggregate ฝั่ง server  MV ต่อเป็น daily
 //   sensor_daily   TTL.hourly .. YEARS          aggregate ตรงเป็นรายวัน
 // ไม่สร้างข้อมูลที่ TTL จะลบทิ้งอยู่ดี เช่นไม่เขียน hourly เก่ากว่า TTL.hourly

@@ -175,8 +175,8 @@ const CASES: { label: string; body: Body }[] = [
     series: [series("p", "avg", "1m", ["power_kw", "temp"])] } },
   { label: "15m 2 วัน last energy", body: { time_range: range(nowH - 2 * DAY, nowH), filters: { device_ids: pm },
     series: [series("e", "last", "15m", ["energy_kwh"])] } },
-  // 5 วัน (ไม่ใช่ 7): hourly ก่อนรอยต่อ long/hourly ของ 11 สร้างจากการสุ่มทุก 60 วิ last จึงเป็นค่า :59:00 diff ตรงรอยต่อเพี้ยน ~0.17
-  { label: "1h 5 วัน diff energy", body: { time_range: range(today - 5 * DAY, today), filters: { device_ids: pm },
+  // 2 วัน (ไม่เกิน TTL.long): hourly ก่อนรอยต่อ long/hourly ของ 11 สร้างจากการสุ่มทุก 60 วิ last จึงเป็นค่า :59:00 diff ตรงรอยต่อเพี้ยน ~0.17
+  { label: "1h 2 วัน diff energy", body: { time_range: range(today - 2 * DAY, today), filters: { device_ids: pm },
     series: [series("e", "diff", "1h", ["energy_kwh"])] } },
   { label: "6h 30 วัน max power", body: { time_range: range(today - 30 * DAY, today), filters: { device_ids: pm },
     series: [series("p", "max", "6h", ["power_kw"])] } },
@@ -229,7 +229,7 @@ const pm1e = (label: string) => lines(label).find((l) => l.group.device_id === "
 const ok = {
   m1: pts("1m 3 ชม.ล่าสุด avg").length === 2 * 180, // pm-1/power_kw + th-1/temp (device ละ metric ที่มีจริงแค่ตัวเดียวจาก 2 ที่ขอ)
   m15_last_increasing: pm1e("15m 2 วัน last energy").every(([, v], i, a) => i === 0 || (v ?? 0) > (a[i - 1]![1] ?? 0)),
-  h1_diff: pm1e("1h 5 วัน diff energy").length === 120 && pm1e("1h 5 วัน diff energy").every(([, v]) => Math.abs((v ?? 0) - 10.5) < 0.01),
+  h1_diff: pm1e("1h 2 วัน diff energy").length === 48 && pm1e("1h 2 วัน diff energy").every(([, v]) => Math.abs((v ?? 0) - 10.5) < 0.01),
   d1_diff: pm1e("24h body ระบบเก่า (diff)").length === 455 && pm1e("24h body ระบบเก่า (diff)").every(([, v]) => Math.abs((v ?? 0) - 252) < 0.01),
   w7_monday: pts("7d 6 เดือน sum + count").every(([t]) => new Date(t).getUTCDay() === 1),
   errors: errors.every((m) => m !== "ไม่ error"),
